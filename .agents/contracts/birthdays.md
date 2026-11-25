@@ -32,22 +32,19 @@ User jobs:
   The toolbar label is clickable day/month/year segments opening jump
   pickers (month grid, year range, native date input); the anchor day is
   kept when valid in the target month, clamped otherwise.
-- **Day panel / day view:** wider modal (980px); Habits / TODOs / Birthdays are
+- **Day panel / day view:** Habits / TODOs / Birthdays are
   welcome-style sections in a responsive grid (`.cal-day-sections`,
   side-by-side when width allows) with per-category subsections
   (`.welcome-todo-cat-label`) for habits and TODOs. Rows reuse the
-  `.bucket-item` look. Month/week cells stretch (`flex`) to fill the space
-  between toolbar and footer, keeping their min-height as the floor.
+  `.bucket-item` look.
 - **Habit DONE gating:** only the row on the habit's actual `next_due` has an
   enabled DONE button — completing any other occurrence would complete the
   current `next_due` instead (`markHabitDone` always completes the current
   due date). Other rows show a disabled button (`calendar.only_next_due`).
-- **Chips:** shape encodes type (todo = square chip/marker, habit = pill/circle,
-  birthday = soft rect + avatar); background encodes the item's category
-  color (birthdays → pink). Dots (phones, year view) keep type colors.
+- **Chips:** appearance encodes the item type and its category color (birthdays → pink). Dots (phones, year view) keep type colors.
 - **Filters:** funnel toolbar button → checkbox popup (TODOs/Habits/Birthdays),
   swatches reuse the chip/dot colors (accent/green/pink)
-- **Avatar:** interactive crop modal with drag/pan/zoom, 384px resolution, migration `003_birthday_avatars.sql`
+- **Avatar:** crop editing, stored at 384px resolution, migration `003_birthday_avatars.sql`
 - **Add:** Calendar "+" dropdown menu → existing add-birthday modal (only menu item for now)
 - **Edit:** tap a birthday in the calendar day panel → edit modal (name, date,
   note, avatar via the preview overlay, delete button)
@@ -78,7 +75,7 @@ User jobs:
 - Calendar views collect birthdays via `birthdaysInRange(birthday, start, end)`:
   occurrences depend only on the requested range (every month it spans),
   never on the view's anchor month
-- Avatar crop persists at 384px resolution, centered
+- Avatar crop persists at 384px resolution
 - `refreshBirthdays()` re-renders the calendar when it is the current view
 
 ## Adapter & Backend

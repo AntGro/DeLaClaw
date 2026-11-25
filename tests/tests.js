@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 
 const JS_DIR = path.join(__dirname, '..', 'js');
@@ -42,6 +43,11 @@ const pendingAsyncTests = [];
 
 async function assertRejects(promise, msg) {
   try { await promise; } catch (e) { return; }
+  throw new Error(msg);
+}
+
+function assertThrows(fn, msg) {
+  try { fn(); } catch (e) { return; }
   throw new Error(msg);
 }
 
@@ -537,6 +543,17 @@ test('style.css lets the Welcome strip scroll inside its section', () => {
     'Missing Welcome strip scroll rule');
 });
 
+// renderLists() replaces the whole lists grid and restores window.scrollY
+// itself; Chrome's scroll anchoring would re-adjust the scroll after the
+// restore, because the anchor row was destroyed by the re-render (ticking
+// an item jumped the window, v2.32.176). The grid opts out of anchoring.
+// Structural pin only — the behaviour is covered by the browser verify
+// (tick in a section list with the window scrolled: scrollY unchanged).
+test('style.css disables scroll anchoring on the lists grid', () => {
+  assert(styleCss.includes('#listsGrid{overflow-anchor:none;}'),
+    'Missing #listsGrid overflow-anchor rule');
+});
+
 // The strip must agree with the day panel: both use the Calendar tab's
 // funnel filter, so a strip cell never shows a TODO/habit its day panel
 // would hide (reported: Dec 13 showed habits on the strip, "Nothing
@@ -997,6 +1014,637 @@ test('Cancelled inline edit skips its refresh when a newer edit has started', ()
     'item-utils.js: finishEdit must return early when a newer edit has started, so a stale refresh never re-renders over it');
   assert(itemUtils.includes('if (myGeneration === _inlineEditGeneration) refreshFn();'),
     'item-utils.js: the deferred refresh timer must re-check the generation when it fires');
+});
+
+// ===================================================================
+// 22c. Touch row actions: two primary + kebab menu (splitRowActions)
+// ===================================================================
+function loadRowActionHelpers() {
+  const itemUtils = jsFiles['item-utils.js'];
+  const start = itemUtils.indexOf('// ── Pure touch row-action helpers ──');
+  const end = itemUtils.indexOf('// ── End pure touch row-action helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure touch row-action helpers block in item-utils.js');
+  return new Function(`${itemUtils.slice(start, end)}; return { TOUCH_PRIMARY_ACTIONS, splitRowActions };`)();
+}
+
+test('Touch row actions: splitRowActions keeps the first two preferred actions per surface', () => {
+  const { TOUCH_PRIMARY_ACTIONS: P, splitRowActions } = loadRowActionHelpers();
+
+  // TODOs: full row (7 buttons) and done row (4 buttons)
+  let r = splitRowActions(['toggle-todo', 'open-snooze-modal', 'share-existing-todo', 'copy-item-link', 'edit-todo-inline', 'delete-todo'], P.todo);
+  assert(JSON.stringify(r.primary) === '[0,4]' && JSON.stringify(r.overflow) === '[1,2,3,5]',
+    'todos: Done + Edit stay visible, snooze/share/link/delete go behind the kebab');
+  r = splitRowActions(['toggle-todo', 'copy-item-link', 'edit-todo-inline', 'delete-todo'], P.todo);
+  assert(JSON.stringify(r.primary) === '[0,2]',
+    'todos (done): Undo + Edit stay visible');
+
+  // Welcome TODO rows use the welcome-* variants of the same actions
+  r = splitRowActions(['welcome-toggle-todo', 'welcome-snooze', 'edit-todo-inline', 'copy-item-link', 'welcome-delete-todo'], P.todo);
+  assert(JSON.stringify(r.primary) === '[0,2]',
+    'welcome todos: Done + Edit stay visible via the welcome-* variants');
+
+  // Habits: full row (8 buttons) and draft row (no Done)
+  r = splitRowActions(['mark-habit-done', 'open-habit-snooze-modal', 'open-habit-history', 'share-existing-habit', 'copy-item-link', 'open-edit-habit-modal', 'delete-habit'], P.habit);
+  assert(JSON.stringify(r.primary) === '[0,5]',
+    'habits: Done + Edit stay visible, snooze/history/share/link/delete go behind the kebab');
+  r = splitRowActions(['open-habit-history', 'copy-item-link', 'open-edit-habit-modal', 'delete-habit'], P.habit);
+  assert(JSON.stringify(r.primary) === '[2]',
+    'habits (draft, no Done): Edit alone stays visible');
+
+  // Welcome habit rows use welcome-mark-habit-done + edit-habit-inline
+  r = splitRowActions(['welcome-mark-habit-done', 'open-habit-snooze-modal', 'welcome-open-habit-history', 'edit-habit-inline', 'copy-item-link', 'welcome-delete-habit'], P.habit);
+  assert(JSON.stringify(r.primary) === '[0,3]',
+    'welcome habits: Done + Edit stay visible via the welcome-* variants');
+
+  // Lists: with attach (Drive) and without (demo)
+  r = splitRowActions(['share-existing-list-item', 'attach-to-list-item', 'copy-item-link', 'edit-list-item-inline', 'delete-list-item'], P.list);
+  assert(JSON.stringify(r.primary) === '[1,3]',
+    'lists: Attach + Edit stay visible');
+  r = splitRowActions(['copy-item-link', 'edit-list-item-inline', 'delete-list-item'], P.list);
+  assert(JSON.stringify(r.primary) === '[1]',
+    'lists (no attach): Edit alone stays visible');
+
+  // Projects: review task and draft task (promote is the status button)
+  r = splitRowActions(['update-task-status', 'open-revision-modal', 'copy-item-link', 'prompt-edit-task', 'delete-task'], P.task);
+  assert(JSON.stringify(r.primary) === '[0,3]',
+    'projects (review): Approve + Edit stay visible');
+  r = splitRowActions(['update-task-status', 'copy-item-link', 'prompt-edit-task', 'delete-task'], P.task);
+  assert(JSON.stringify(r.primary) === '[0,2]',
+    'projects (draft): Promote + Edit stay visible');
+
+  // Memory cards: Edit + Delete, copy link behind the kebab
+  r = splitRowActions(['copy-item-link', 'open-edit-flashcard', 'delete-flashcard'], P.card);
+  assert(JSON.stringify(r.primary) === '[1,2]' && JSON.stringify(r.overflow) === '[0]',
+    'memory cards: Edit + Delete stay visible, copy link goes behind the kebab');
+
+  // Memory texts: Revise + Revise all, the rest behind the kebab
+  r = splitRowActions(['copy-item-link', 'start-text-practice-for-text', 'start-text-practice-all-chunks', 'tr-expand-toggle', 'open-edit-text', 'delete-text'], P.text);
+  assert(JSON.stringify(r.primary) === '[1,2]' && JSON.stringify(r.overflow) === '[0,3,4,5]',
+    'memory texts: Revise + Revise all stay visible');
+
+  // Memory drafts: Propose + Edit; once a proposal exists, Edit + Delete
+  r = splitRowActions(['copy-item-link', 'request-proposal', 'start-inline-edit-draft', 'delete-draft'], P.draft);
+  assert(JSON.stringify(r.primary) === '[1,2]',
+    'memory drafts: Propose + Edit stay visible');
+  r = splitRowActions(['copy-item-link', 'start-inline-edit-draft', 'delete-draft'], P.draft);
+  assert(JSON.stringify(r.primary) === '[1,2]',
+    'memory drafts (proposal exists): Edit + Delete stay visible');
+
+  // Boundaries: unknown keys never become primary; empty input splits empty
+  r = splitRowActions(['copy-item-link', 'delete-todo'], P.todo);
+  assert(JSON.stringify(r.primary) === '[]' && JSON.stringify(r.overflow) === '[0,1]',
+    'no preferred action present: nothing stays visible, everything goes behind the kebab');
+  r = splitRowActions([], P.todo);
+  assert(JSON.stringify(r.primary) === '[]' && JSON.stringify(r.overflow) === '[]',
+    'empty row splits empty');
+});
+
+test('Touch row actions: compaction runs in the touch branch and the kebab menu reuses the row buttons', () => {
+  const itemUtils = jsFiles['item-utils.js'];
+  assert(itemUtils.includes('compactRowActionsForTouch(item, actions)'),
+    'item-utils.js: initItemHoverDelay must compact row actions on touch');
+  assert(itemUtils.includes("kebab.className = 'row-action-kebab'"),
+    'item-utils.js: the compaction must append a kebab button');
+  assert(itemUtils.includes('cloneNode(true)') && itemUtils.includes("clone.classList.add('header-menu-item')"),
+    'item-utils.js: menu rows must be clones of the row buttons styled as header-menu items');
+  assert(itemUtils.includes('function openRowActionsMenu') && itemUtils.includes('function closeRowActionsMenu'),
+    'item-utils.js: the kebab menu must have open/close functions');
+  assert(itemUtils.includes("kebab.setAttribute('aria-haspopup', 'menu')") && itemUtils.includes("kebab.setAttribute('aria-expanded'") && itemUtils.includes("kebab.setAttribute('aria-controls', 'rowActionsMenu')"),
+    'item-utils.js: the kebab must expose its menu state (haspopup/expanded/controls), as the groups add-menu does');
+  assert(itemUtils.includes("_rowActionsMenu.id = 'rowActionsMenu'"),
+    'item-utils.js: the shared menu must carry the id the kebabs point at');
+  assert(itemUtils.includes("clone.setAttribute('role', 'menuitem')"),
+    'item-utils.js: menu rows must carry role=menuitem, matching the menu container');
+  assert(itemUtils.includes("menu.querySelector('[role=\"menuitem\"]')?.focus()"),
+    'item-utils.js: opening the menu must move focus to its first item');
+  assert(itemUtils.includes("closeRowActionsMenu(true)") && itemUtils.includes("if (restoreFocus) _rowActionsMenu._forKebab.focus()"),
+    'item-utils.js: Escape, Tab and choosing an item must close the menu and return focus to the kebab');
+  assert(itemUtils.includes("e.key === 'ArrowDown'") && itemUtils.includes("e.key === 'ArrowUp'") && itemUtils.includes('items[next].focus()'),
+    'item-utils.js: arrow keys must move focus between menu items (roving tabindex)');
+
+  // Boot sets the html.touch class that the CSS keys off
+  const main = jsFiles['main.js'];
+  assert(main.includes("document.documentElement.classList.toggle('touch', isTouchDevice())"),
+    'main.js: boot must set the html.touch class from isTouchDevice()');
+
+  // CSS: bigger targets, overflow hidden behind the kebab, menu styles
+  assert(styleCss.includes('html.touch .todo-actions button') && styleCss.includes('min-width:40px'),
+    'style.css: touch action buttons must be bigger (40px targets)');
+  assert(styleCss.includes('button.row-action-overflow') && styleCss.includes('display:none'),
+    'style.css: overflow buttons must hide on touch');
+  assert(styleCss.includes('.row-actions-menu') && styleCss.includes('.row-actions-menu.open'),
+    'style.css: the kebab menu must be styled');
+
+  // i18n: kebab label in all three locales
+  const i18n = jsFiles['i18n.js'];
+  assert((i18n.match(/more_actions:/g) || []).length === 3,
+    'i18n.js: common.more_actions must exist in EN/FR/ES');
+});
+
+// ===================================================================
+// 22d. Swipe navigation: left/right swipes switch tabs (touch only)
+// ===================================================================
+function loadSwipeHelpers() {
+  const utils = jsFiles['utils.js'];
+  const start = utils.indexOf('// ── Pure swipe helpers ──');
+  const end = utils.indexOf('// ── End pure swipe helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure swipe helpers block in utils.js');
+  return new Function(`${utils.slice(start, end)}; return { SWIPE_MIN_DX, SWIPE_MAX_DT_MS, SWIPE_MIN_RATIO, swipeDirection };`)();
+}
+
+test('Swipe navigation: swipeDirection recognises quick mostly-horizontal swipes only', () => {
+  const { swipeDirection } = loadSwipeHelpers();
+  assert(swipeDirection(-80, 0, 150) === 'next', 'a left swipe moves to the next tab');
+  assert(swipeDirection(80, 0, 150) === 'prev', 'a right swipe moves to the previous tab');
+  assert(swipeDirection(-61, 0, 150) === 'next', '61px sideways clears the 60px threshold');
+  assert(swipeDirection(-60, 0, 150) === null, 'exactly 60px does not count as a swipe');
+  assert(swipeDirection(-5, 0, 150) === null, 'a tap is not a swipe');
+  assert(swipeDirection(-100, 0, 500) === null, 'a 500ms gesture is too slow');
+  assert(swipeDirection(-100, 0, 499) === 'next', '499ms still counts');
+  assert(swipeDirection(-80, 40, 150) === 'next', 'a mostly-horizontal diagonal still counts');
+  assert(swipeDirection(-80, 60, 150) === null, 'a diagonal past the 1.5x ratio does not count');
+  assert(swipeDirection(0, -120, 150) === null, 'a vertical swipe never switches tabs');
+});
+
+test('Swipe navigation: main.js wires touch listeners mirroring Alt+Arrow', () => {
+  const main = jsFiles['main.js'];
+  assert(main.includes("document.addEventListener('touchstart'"),
+    'main.js: swipe nav must listen for touchstart');
+  assert(main.includes("document.addEventListener('touchend'"),
+    'main.js: swipe nav must listen for touchend');
+  assert(main.includes('swipeDirection('),
+    'main.js: swipe nav must classify the gesture with swipeDirection');
+  assert(main.includes('getVisibleTabs()'),
+    'main.js: swipe nav must use the same tab list as Alt+Arrow (order + visibility)');
+  assert(main.includes("if (isTouchDevice())"),
+    'main.js: swipe nav must be gated on touch devices');
+  // Guards: modal, chunk panel, practice overlay, header, drag
+  assert(main.includes("'.modal-overlay.visible, .modal.visible'"),
+    'main.js: swipe nav must not fire while a modal is open');
+  assert(main.includes("getElementById('chunkPanel')"),
+    'main.js: swipe nav must not fire while the chunk panel is open');
+  assert(main.includes("getElementById('practiceOverlay')"),
+    'main.js: swipe nav must not fire while the practice overlay is open');
+  assert(main.includes("'.app-header'"),
+    'main.js: swipe nav must ignore swipes starting in the header');
+  assert(main.includes("'item-drag-active'"),
+    'main.js: swipe nav must not fire while a drag is running');
+  // The trailing click of the gesture must not land in the new tab
+  assert(main.includes('stopPropagation') && main.includes('setTimeout(cleanupSwallow, 350)'),
+    'main.js: swipe nav must swallow the trailing click of the gesture');
+  const utils = jsFiles['utils.js'];
+  assert(utils.includes('swipeDirection,'),
+    'utils.js: swipeDirection must be exported');
+});
+
+// ===================================================================
+// 22e. Draft deck movable among the top-level roots (never in a section)
+// ===================================================================
+function loadDraftPositionHelpers() {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('// ── Pure draft-position helpers ──');
+  const end = fc.indexOf('// ── End pure draft-position helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure draft-position helpers block in flashcards.js');
+  return new Function(`${fc.slice(start, end)}; return { clampDraftNavIndex, draftIndexInOrder };`)();
+}
+
+test('Draft deck: position helpers clamp and locate the draft chip', () => {
+  const { clampDraftNavIndex, draftIndexInOrder } = loadDraftPositionHelpers();
+  assert(clampDraftNavIndex(0, 5) === 0, '0 stays first (the historical spot)');
+  assert(clampDraftNavIndex(2, 5) === 2, 'a middle position is kept');
+  assert(clampDraftNavIndex(5, 5) === 5, 'last position is allowed');
+  assert(clampDraftNavIndex(9, 5) === 5, 'beyond the end clamps to last');
+  assert(clampDraftNavIndex(-2, 5) === 0, 'a negative index clamps to first');
+  assert(clampDraftNavIndex(NaN, 5) === 0, 'a non-numeric stored value falls back to first');
+  assert(clampDraftNavIndex(undefined, 5) === 0, 'a missing stored value falls back to first');
+  assert(draftIndexInOrder(['a', '__drafts', 'b']) === 1, 'the draft index is read from the nav order');
+  assert(draftIndexInOrder(['a', 'b']) === -1, 'a section-children reorder has no draft chip');
+});
+
+test('Draft deck: movable in the top nav, frozen out of sections, shared stays frozen', () => {
+  const fc = jsFiles['flashcards.js'];
+  const navInitStart = fc.indexOf('function initFlashDeckNavBtnReorder()');
+  const navInitEnd = fc.indexOf('\n}\n', navInitStart);
+  assert(navInitStart !== -1 && navInitEnd > navInitStart, 'could not find initFlashDeckNavBtnReorder');
+  const navInit = fc.slice(navInitStart, navInitEnd);
+  assert(!navInit.includes("'__drafts'"),
+    'flashcards.js: the top-nav reorder must no longer skip the Draft chip');
+  assert(navInit.includes('_sharedDeckId'),
+    'flashcards.js: the top-nav reorder must still skip the shared deck');
+  assert(fc.includes('draftIndexInOrder(orderedIds)'),
+    'flashcards.js: reorderDeckSiblings must read the draft position from the new order');
+  assert(fc.includes("flash_draft_nav_index"),
+    'flashcards.js: the draft position must persist in settings');
+  assert(fc.includes('rootBtns.splice(clampDraftNavIndex(_draftNavIndex, rootBtns.length), 0, draftBtn)'),
+    'flashcards.js: the nav must render the Draft chip at its stored position');
+  assert(fc.includes('roots.slice(0, draftAt)') && fc.includes('roots.slice(draftAt)'),
+    'flashcards.js: the grid must place the Draft bucket at the same stored position');
+  const crossStart = fc.indexOf('function flashDeckCrossDrop()');
+  const crossEnd = fc.indexOf('\n}\n', crossStart);
+  assert(crossStart !== -1 && crossEnd > crossStart, 'could not find flashDeckCrossDrop');
+  assert(fc.slice(crossStart, crossEnd).includes('if (!node) return false;'),
+    'flashcards.js: cross-drop must refuse a drag id that is not a tree node (Draft is none, so it can never enter a section)');
+});
+
+// ===================================================================
+// 22f. Chunk revision scores: last-20 history, in-segment fill
+// ===================================================================
+function loadChunkScoreHelpers() {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('// ── Pure chunk-score helpers ──');
+  const end = fc.indexOf('// ── End pure chunk-score helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure chunk-score helpers block in flashcards.js');
+  return new Function(`${fc.slice(start, end)}; return { CHUNK_SCORE_HISTORY, parseRecentScores, appendRecentScore, latestChunkScore, scorePct, scoreCurvePoints, scoreCurveSvg };`)();
+}
+
+test('Chunk scores: parse/append/latest keep the last 20 ratios, oldest first', () => {
+  const { CHUNK_SCORE_HISTORY, parseRecentScores, appendRecentScore, latestChunkScore, scorePct } = loadChunkScoreHelpers();
+  assert(CHUNK_SCORE_HISTORY === 20, 'history is capped at 20 scores');
+  assert(JSON.stringify(parseRecentScores([0.5, 1])) === JSON.stringify([0.5, 1]), 'an array passes through');
+  assert(JSON.stringify(parseRecentScores('[0.5,1]')) === JSON.stringify([0.5, 1]), 'a JSON string parses');
+  assert(JSON.stringify(parseRecentScores(null)) === JSON.stringify([]), 'a missing value is no scores');
+  assert(JSON.stringify(parseRecentScores('garbage')) === JSON.stringify([]), 'an unparsable value is no scores');
+  assert(JSON.stringify(parseRecentScores([0.5, 2, -1, 'x', null])) === JSON.stringify([0.5]), 'out-of-range and non-numeric entries are dropped');
+  const many = Array.from({ length: 25 }, (_, i) => i / 25);
+  assert(parseRecentScores(many).length === 20 && parseRecentScores(many)[0] === 5 / 25,
+    'more than 20 scores keeps only the last 20');
+  assert(JSON.stringify(appendRecentScore([0.5], 1)) === JSON.stringify([0.5, 1]), 'a score appends');
+  assert(appendRecentScore(Array.from({ length: 20 }, () => 0.5), 1).length === 20,
+    'appending past 20 drops the oldest');
+  assert(JSON.stringify(appendRecentScore([0.5], 2)) === JSON.stringify([0.5]), 'an out-of-range ratio is rejected');
+  assert(latestChunkScore([0.5, 0.8]) === 0.8, 'latest is the last score');
+  assert(latestChunkScore([]) === null && latestChunkScore(null) === null, 'no scores means no latest');
+  assert(scorePct(0.6) === 60 && scorePct(1) === 100 && scorePct(null) === null, 'percent rounds, null stays null');
+});
+
+test('Chunk scores: submit records the score for scheduled and free practice; the bar fills from it', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('updates.recent_scores = JSON.stringify(nextScores)'),
+    'flashcards.js: a scheduled review must fold the score history into the FSRS update');
+  assert(fc.includes("update({ recent_scores: JSON.stringify(nextScores) })"),
+    'flashcards.js: free practice must persist the score history without touching scheduling');
+  assert(fc.includes('class="tr-seg-fill"') && fc.includes('style="width:${scorePct(latest)}%"'),
+    'flashcards.js: each segment must carry a left-anchored fill whose width is the latest score');
+  assert(fc.includes("latest === 0 ? ' tr-seg-zero' : ''"),
+    'flashcards.js: a latest score of 0 must mark the segment, since a 0-width fill is invisible');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('.tr-seg-zero') && css.includes('border-left:3px solid var(--red)'),
+    'style.css: the zero-score marker must be a red bottom border');
+  assert(fc.includes('chunk_recent_scores') && fc.includes('tr-chunk-score-bars'),
+    'flashcards.js: the chunk panel must show the recent-scores history');
+  const i18n = jsFiles['i18n.js'];
+  assert((i18n.match(/chunk_last_score:/g) || []).length === 3,
+    'i18n.js: chunk_last_score must exist in EN/FR/ES');
+  assert((i18n.match(/chunk_recent_scores:/g) || []).length === 3,
+    'i18n.js: chunk_recent_scores must exist in EN/FR/ES');
+});
+
+test('Chunk scores: migration 2.32.149 adds recent_scores on both backends', async () => {  const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+  assert(local.includes("'2.32.149':") && local.includes('ALTER TABLE text_line_progress ADD COLUMN recent_scores TEXT'),
+    'local-migrations.js: 2.32.149 must add the recent_scores column');
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+  assert(drive.includes("'2.32.149':") && drive.includes('row.recent_scores'),
+    'drive-migrations.js: 2.32.149 must normalise recent_scores');
+  const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+  assert(schema.includes('recent_scores TEXT'),
+    'server/schema.sql: fresh databases must have the recent_scores column');
+  const { DRIVE_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+  const store = { text_line_progress: [
+    { id: 'c1', recent_scores: [0.5, 1] },
+    { id: 'c2', title: 'no scores' },
+  ]};
+  await DRIVE_MIGRATIONS['2.32.149'](store);
+  assert(store.text_line_progress[0].recent_scores === '[0.5,1]',
+    'drive migration must stringify an array-shaped history');
+  assert(!('recent_scores' in store.text_line_progress[1]),
+    'drive migration must leave rows without scores untouched');
+});
+
+test('Chunk scores: editing a chunk clears its score history with the rest of the revision state', () => {
+  const fc = jsFiles['flashcards.js'];
+  const saveAt = fc.indexOf('window.saveEditChunk');
+  assert(saveAt !== -1, 'could not find saveEditChunk in flashcards.js');
+  const resetAt = fc.indexOf('const reset = {', saveAt);
+  assert(resetAt !== -1, 'could not find the chunk-edit reset object');
+  const reset = fc.slice(resetAt, fc.indexOf('};', resetAt));
+  assert(reset.includes('recent_scores: null'),
+    'flashcards.js: the chunk-edit reset must clear recent_scores, or old scores would stay attached to the new wording');
+  assert(reset.includes('review_count: 0') && reset.includes('stability: 0'),
+    'flashcards.js: the reset must still clear the FSRS state alongside the scores');
+  assert(fc.includes("await state.db.from('text_line_progress').update(reset).eq('id', chunk.id);")
+    && fc.includes('Object.assign(chunk, reset);'),
+    'flashcards.js: the reset (scores included) must reach both the database row and the in-memory chunk');
+});
+
+// ===================================================================
+// 22g. Chunk segments: bigger touch targets (28px, 10 collapsed)
+// ===================================================================
+test('Chunk segments are 28px targets on touch, 16px on desktop', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('TR_BAR_COLLAPSED_COUNT_TOUCH = 10'),
+    'flashcards.js: the touch collapsed count must be 10 (10 x 28px + 3px gaps fits the 332px bar on a 390px phone)');
+  assert(fc.includes('isTouchDevice() ? TR_BAR_COLLAPSED_COUNT_TOUCH : TR_BAR_COLLAPSED_COUNT'),
+    'flashcards.js: the collapsed count must switch on the touch device check');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('html.touch .tr-seg { flex:1 1 28px; min-width:28px; height:28px; }'),
+    'style.css: touch segments must be 28px targets');
+  assert(css.includes('.tr-progress-bar { display:flex; gap:3px;'),
+    'style.css: the gap between segments must be 3px');
+  assert(css.includes('html.touch .tr-progress-bar:not(.tr-bar-expanded) .tr-seg:nth-child(n+11) { display:none; }'),
+    'style.css: the touch collapsed bar must hide from the 11th segment');
+  assert(css.includes('html.touch .tr-progress-bar.tr-bar-expanded .tr-seg { flex:0 0 28px; height:28px; }'),
+    'style.css: the touch expanded bar must stay a uniform 28px grid');
+  // A tap must not close the panel it just opened: on touch the mouseout
+  // after a tap is a synthetic artefact (the mouse jumps back to where
+  // it was before the touch), so the hover-close must not run there.
+  assert(fc.includes("document.addEventListener('mouseout'") && fc.includes('if (isTouchDevice()) return;'),
+    'flashcards.js: the chunk-panel mouseout close must be skipped on touch devices');
+});
+
+// ===================================================================
+// 22h. Chunk panel preview: first words of the chunk
+// ===================================================================
+test('Chunk panel preview: first words of plain and scene chunks', async () => {
+  const { chunkPreviewText } =
+    await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);
+  assert(chunkPreviewText('I met a traveller from an antique land,\nWho said — "Two vast and trunkless legs of stone"\nStand in the desert.')
+    === 'I met a traveller from an antique land, Who said — "Two vas…',
+    'a plain chunk joins its first lines and cuts at 60 chars with an ellipsis');
+  assert(chunkPreviewText('Short line.') === 'Short line.',
+    'a short chunk is returned as-is');
+  assert(chunkPreviewText('\n\n  \nFirst real line.\nSecond.') === 'First real line. Second.',
+    'blank lines are skipped');
+  assert(chunkPreviewText([
+    { speaker: null, segments: [{ text: 'A bare stage.' }] },
+    { speaker: 'ELENA', segments: [{ text: 'Is anyone there?' }] },
+    { speaker: 'MARCUS', segments: [{ text: 'You are early.' }] },
+  ]) === 'A bare stage. ELENA: Is anyone there? MARCUS: You are early.',
+    'a scene chunk prefixes the speaker where there is one');
+  assert(chunkPreviewText('') === '' && chunkPreviewText([]) === '' && chunkPreviewText(null) === '',
+    'an empty chunk has no preview');
+  assert(chunkPreviewText('x'.repeat(100)).length === 60,
+    'the preview never exceeds the max length');
+});
+
+test('Chunk panel preview: the panel header shows it in both views', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('const preview = chunkPreviewText(chunks[_chunkPanelIndex]);'),
+    'flashcards.js: the panel render must compute the chunk preview');
+  assert(fc.includes('tr-chunk-panel-preview') && fc.includes('chunkPanelHeaderHtml(title, true, preview)'),
+    'flashcards.js: the panel header must show the preview in both views');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('.tr-chunk-panel-preview'),
+    'style.css: the preview line must be styled');
+});
+
+// ===================================================================
+// 22i. Text practice rollback: a third click hides the line and every
+// line after it, so the passage can be revised again in place
+// ===================================================================
+function loadTextPracticeLineHelpers() {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('// ── Pure text-practice line helpers ──');
+  const end = fc.indexOf('// ── End pure text-practice line helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure text-practice line helpers block in flashcards.js');
+  return new Function(`${fc.slice(start, end)}; return { revealedLineClickAction, maskedLineBullets };`)();
+}
+
+test('Text practice rollback: the click cycle on a revealed line', () => {
+  const { revealedLineClickAction, maskedLineBullets } = loadTextPracticeLineHelpers();
+  assert(revealedLineClickAction('mine', true) === 'mark-failed',
+    'a known own line marks as failed on the next click');
+  assert(revealedLineClickAction('mine', false) === 'rollback',
+    'a failed own line rolls back on the next click');
+  assert(revealedLineClickAction('cue', false) === 'rollback' && revealedLineClickAction('dir', false) === 'rollback',
+    'a shown cue or direction line rolls back at once (it is never evaluated)');
+  assert(maskedLineBullets('abcdef') === '• ',
+    'a 6-character line hides behind one bullet');
+  assert(maskedLineBullets('abcdefg') === '• • ',
+    'a 7-character line hides behind two bullets');
+  assert(maskedLineBullets('ab\ncdefghij') === '• <br>• • ',
+    'each part of a multi-part line gets its own bullets');
+  assert(maskedLineBullets('') === '• ',
+    'an empty line still shows one bullet');
+});
+
+test('Text practice rollback: the handler masks from the clicked line on', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes("const action = revealedLineClickAction(kind, el.classList.contains('tr-line-known'));"),
+    'flashcards.js: handleLineClick must dispatch on the revealed-line action');
+  assert(fc.includes('rollbackTextPracticeFrom(idx);'),
+    'flashcards.js: the rollback action must call the rollback helper');
+  assert(fc.includes("if (parseInt(lineEl.dataset.lineIdx, 10) < fromIdx) return;"),
+    'flashcards.js: the rollback must leave earlier lines untouched');
+  assert(fc.includes("lineEl.innerHTML = lineObj ? maskedLineBullets(lineObj.plain) : '';"),
+    'flashcards.js: rolled-back lines must get their bullets placeholder back');
+  assert(fc.includes("if (submit) submit.style.display = 'none';"),
+    'flashcards.js: the rollback must hide the submit button again');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  assert(i18n.includes('tap a failed line again to redo from there')
+    && i18n.includes('touchez une ligne échouée pour reprendre à partir d’elle')
+    && i18n.includes('toca una línea fallida para repetir desde ahí'),
+    'i18n.js: the hint must name the rollback in all three locales');
+});
+
+// ===================================================================
+// 22j. End-of-revision summary: curve of the last scores
+// ===================================================================
+test('Score curve: points map 0-100% bottom-to-top, oldest first', () => {
+  const { scoreCurvePoints, scoreCurveSvg } = loadChunkScoreHelpers();
+  assert(JSON.stringify(scoreCurvePoints([])) === '[]' && JSON.stringify(scoreCurvePoints([0.8])) === '[]',
+    'fewer than two scores draws no curve');
+  const pts = scoreCurvePoints([0, 0.5, 1]);
+  assert(pts.length === 3, 'one point per session');
+  assert(pts[0].x < pts[1].x && pts[1].x < pts[2].x, 'sessions run oldest first, left to right');
+  assert(pts[0].y > pts[1].y && pts[1].y > pts[2].y, 'a higher score sits higher');
+  assert(pts[0].pct === 0 && pts[1].pct === 50 && pts[2].pct === 100, 'each point carries its percentage');
+  assert(scoreCurveSvg([0.8]) === '', 'one score draws no curve');
+  const svg = scoreCurveSvg([0.5, 1]);
+  assert(svg.includes('<svg class="tr-score-curve"') && svg.includes('<polyline class="tr-score-curve-line"'),
+    'two scores draw a line');
+  assert((svg.match(/<circle/g) || []).length === 2, 'one dot per session');
+  assert(svg.includes('tr-score-curve-dot-last') && svg.includes('<title>100%</title>'),
+    'the latest session is marked and labelled');
+  assert(svg.includes('>100%</text>') && svg.includes('>50%</text>') && svg.includes('>0%</text>'),
+    'the curve carries its 0/50/100% scale');
+  assert((svg.match(/tr-score-curve-grid/g) || []).length === 3,
+    'each scale step gets a gridline');
+});
+
+test('Score curve: both summaries show it once there is history', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('showFreePracticeSummary(knownCount, totalLines, res.nextScores)')
+    && fc.includes('showTextPracticeSummary(knownCount, totalLines, res.rating, res.nextScores)'),
+    'flashcards.js: the submit must pass the score history to both summaries');
+  assert(fc.includes('const curve = scoreCurveSvg(scores);'),
+    'flashcards.js: the summaries must build the curve from the history');
+  assert(fc.includes('tr-score-curve-wrap') && fc.includes("t('text_revision.chunk_recent_scores')"),
+    'flashcards.js: the curve must carry its Recent scores label');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('.tr-score-curve-line') && css.includes('.tr-score-curve-dot-last'),
+    'style.css: the curve line and the latest dot must be styled');
+  assert(css.includes('.tr-score-curve-grid') && css.includes('.tr-score-curve-tick'),
+    'style.css: the scale gridlines and tick labels must be styled');
+  // The summary's small grey labels sat at ~4.1:1 on the background
+  // (below AA), then a 70% text mix (6.1:1 / 7.9:1) — now full text
+  // colour at a larger size, which clears AAA in both themes. The
+  // flashcard session summary shares the stat label.
+  assert(css.includes('.practice-stat-lbl { font-size:0.875rem; color:var(--text);'),
+    'style.css: the stat label must be full text colour at 0.875rem');
+  assert(css.includes('.tr-free-note { text-align:center; font-size:0.9rem; color:var(--text);'),
+    'style.css: the free-practice note must be full text colour at 0.9rem');
+  assert(css.includes('.tr-score-curve-label { font-size:0.9rem; color:var(--text);'),
+    'style.css: the curve label must be full text colour at 0.9rem');
+  assert(css.includes('.tr-score-curve-tick { font-size:10px; fill:var(--text); }'),
+    'style.css: the scale ticks must be full text colour at 10px');
+  assert(!css.includes('.practice-stat-lbl { font-size:0.75rem; color:var(--muted);'),
+    'style.css: the stat label must no longer use the low-contrast muted grey');
+});
+
+// ===================================================================
+// 22k. Revise all chunks in one session
+// ===================================================================
+function loadAllChunksHelpers() {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('// ── Pure all-chunks session helpers ──');
+  const end = fc.indexOf('// ── End pure all-chunks session helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure all-chunks session helpers block in flashcards.js');
+  return new Function(`${fc.slice(start, end)}; return { lastCompletedChunkPos, chunkLineStats };`)();
+}
+
+test('All chunks: the last completed chunk is the one before the first masked line', () => {
+  const { lastCompletedChunkPos, chunkLineStats } = loadAllChunksHelpers();
+  const states = (spec) => spec.map(([pos, state]) => ({ pos, kind: 'mine', state }));
+  assert(lastCompletedChunkPos([]) === -1, 'no lines, nothing complete');
+  assert(lastCompletedChunkPos(states([[0, 'masked']])) === -1, 'nothing revealed yet');
+  assert(lastCompletedChunkPos(states([[0, 'known'], [0, 'failed'], [1, 'masked']])) === 0,
+    'chunk 0 complete, chunk 1 started');
+  assert(lastCompletedChunkPos(states([[0, 'known'], [1, 'known'], [1, 'failed']])) === 1,
+    'no masked lines left: every chunk complete');
+  assert(lastCompletedChunkPos(states([[0, 'known'], [1, 'masked'], [2, 'masked']])) === 0,
+    'a later masked chunk does not un-complete the earlier one');
+  const mixed = [
+    { pos: 0, kind: 'mine', state: 'known' }, { pos: 0, kind: 'cue', state: 'shown' },
+    { pos: 0, kind: 'mine', state: 'failed' }, { pos: 1, kind: 'mine', state: 'masked' },
+  ];
+  assert(chunkLineStats(mixed, 0).known === 1 && chunkLineStats(mixed, 0).total === 2,
+    'per-chunk stats count own lines only, cues excluded');
+  assert(chunkLineStats(mixed, 1).known === 0 && chunkLineStats(mixed, 1).total === 1,
+    'a masked own line counts in the total but not as known');
+});
+
+test('All chunks: button, session, stop button and summary are wired', () => {
+  const fc = jsFiles['flashcards.js'];
+  assert(fc.includes('data-action="start-text-practice-all-chunks"') && fc.includes("t('text_revision.revise_all_chunks')"),
+    'flashcards.js: the text row must carry a Revise all chunks button');
+  assert(fc.includes('window.startTextPracticeAllChunks = startTextPracticeAllChunks'),
+    'flashcards.js: the all-chunks session must be window-exposed for delegation');
+  assert(fc.includes("chunks.map(ch => ({ chunk: ch, mode: chunkReviseMode(ch, now) }))"),
+    'flashcards.js: each chunk must keep the mode it would have had on its own (FSRS when due/new, practice otherwise)');
+  assert(fc.includes('tr-chunk-separator') && fc.includes("t('text_revision.chunk_title'"),
+    'flashcards.js: the overlay must separate chunks with a labelled dashed separator');
+  assert(fc.includes('data-chunk-pos=') && fc.includes('updateStopButton()'),
+    'flashcards.js: lines must carry their chunk position and the stop button must update on reveal and rollback');
+  assert(fc.includes('window.submitAllChunksReview') && fc.includes('window.stopAllChunksReview'),
+    'flashcards.js: the full submit and the early stop must both exist');
+  assert(fc.includes('let trSubmitting = false;'),
+    'flashcards.js: the revision submit must have a session-level in-flight flag');
+  assert(fc.includes('window.submitAllChunksReview = async function(uptoPos')
+    && fc.includes('if (trSubmitting) return;'),
+    'flashcards.js: a second submit while one is saving must be ignored');
+  assert(fc.includes('trSubmitting = true;') && fc.includes('setPracticeSubmitDisabled(true);'),
+    'flashcards.js: submitting must set the flag and disable the Submit/Stop buttons before the first save');
+  assert(fc.includes('trSubmitting = false;') && fc.includes('setPracticeSubmitDisabled(false);'),
+    'flashcards.js: a failed save must release the flag and re-enable the buttons so the user can retry');
+  const overlayFn = fc.slice(fc.indexOf('function showTextPracticeOverlay'), fc.indexOf('let overlay = document.getElementById', fc.indexOf('function showTextPracticeOverlay')));
+  assert(overlayFn.includes('trSubmitting = false;'),
+    'flashcards.js: a new overlay open must reset the flag, or Continue after a summary could never submit again');
+  assert(overlayFn.includes('trPersistedChunkPos = new Set();') && overlayFn.includes('trSessionResults = [];'),
+    'flashcards.js: a new overlay open must also clear the saved-chunk record and the accumulated results, or a fresh session would skip chunks');
+  const endFn = fc.slice(fc.indexOf('window.endTextPractice = function()'), fc.indexOf('renderFlashcards();', fc.indexOf('window.endTextPractice = function()')));
+  assert(endFn.includes('trSubmitting = false;'),
+    'flashcards.js: closing a session must reset the flag too');
+  assert(endFn.includes('trPersistedChunkPos = new Set();') && endFn.includes('trSessionResults = [];'),
+    'flashcards.js: closing a session must clear the saved-chunk record and the accumulated results too');
+  // A failed save must be transactional: compute, persist, then mutate.
+  const applyFn = fc.slice(fc.indexOf('async function applyChunkReview'), fc.indexOf('function setPracticeSubmitDisabled'));
+  assert((applyFn.match(/const \{ error \} = await state\.db\.from\('text_line_progress'\)\.update\(/g) || []).length === 2,
+    'flashcards.js: both persistence paths in applyChunkReview must inspect the returned error');
+  assert((applyFn.match(/if \(error\) throw error;/g) || []).length === 2,
+    'flashcards.js: a failed database update must surface as an exception instead of a silent success');
+  assert(applyFn.indexOf('chunk.recent_scores = nextScores') > applyFn.indexOf("update({ recent_scores: JSON.stringify(nextScores) })"),
+    'flashcards.js: the practice path must persist the score before mutating the in-memory chunk, or a retry scores twice');
+  assert(applyFn.indexOf('Object.assign(chunk, updates)') > applyFn.indexOf('.update(updates)'),
+    'flashcards.js: the scheduled path must persist the FSRS update before mutating the in-memory chunk, or a retry re-applies FSRS');
+  // A retry resumes after the chunks already saved, and the summary covers them.
+  assert(fc.includes('if (trPersistedChunkPos.has(pos)) continue;') && fc.includes('trPersistedChunkPos.add(pos)'),
+    'flashcards.js: a multi-chunk retry must skip the chunks an earlier attempt already saved');
+  assert(fc.includes('trSessionResults.push('),
+    'flashcards.js: results must accumulate across submit attempts so the summary covers every saved chunk');
+  const singleSubmitFn = fc.slice(fc.indexOf('window.submitTextReview'), fc.indexOf('window.submitAllChunksReview'));
+  const multiSubmitFn = fc.slice(fc.indexOf('window.submitAllChunksReview'), fc.indexOf('window.stopAllChunksReview'));
+  assert(singleSubmitFn.includes("showToast(t('toast.update_failed'), 'error')")
+    && multiSubmitFn.includes("showToast(t('toast.update_failed'), 'error')"),
+    'flashcards.js: a failed save must tell the user, or the retry the guard release allows is invisible');
+  assert(!singleSubmitFn.includes('throw e;') && !multiSubmitFn.includes('throw e;'),
+    'flashcards.js: a failed save must be handled (toast + guard release), not rethrown as an unhandled rejection');
+  const submitCss = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(submitCss.includes('.practice-done-btn:disabled'),
+    'style.css: a disabled submit button must look inert while saving');
+  assert(fc.includes('applyChunkReview(entry.chunk, known, total, entry.mode === \'fsrs\')'),
+    'flashcards.js: the all-chunks submit must score each chunk through the shared per-chunk helper');
+  assert(fc.includes('applyChunkReview(chunk, knownCount, totalLines, !trFreePractice)'),
+    'flashcards.js: the single-chunk submit must use the same shared helper (no drift between the two paths)');
+  assert(fc.includes('showMultiChunkPracticeSummary(trSessionResults, trSessionChunks.length, textTotal)'),
+    'flashcards.js: the all-chunks submit must show the aggregate summary from the results accumulated across attempts');
+  assert(fc.includes("t('text_revision.chunks_completed')") && fc.includes('tr-multi-chunk-detail')
+    && fc.includes("data-action=\"toggle-chunk-summary-stats\""),
+    'flashcards.js: the summary must show the aggregate plus one row per completed chunk that expands its stats in place');
+  assert(fc.includes('const curve = scoreCurveSvg(r.scores);')
+    && fc.includes("t('text_revision.chunk_next_review')") && fc.includes('tr-chunk-score-bars'),
+    'flashcards.js: each expanded row must show its own score curve, score bars, status and next review');
+  assert(!fc.includes('openChunkStatsFromSummary'),
+    'flashcards.js: the panel redirect must be gone — the stats live in the summary');
+  assert(fc.includes("function startTextPracticeAllChunks(textId, fromChunkIndex = 0)")
+    && fc.includes('ch.chunk_index >= fromChunkIndex') && fc.includes('fromChunkIndex,'),
+    'flashcards.js: revise-all must accept a starting chunk and cover only that chunk onward');
+  assert(fc.includes("t('text_revision.from_chunk', trAllChunksFrom + 1, allChunks.length)"),
+    'flashcards.js: a from-chunk session must badge itself with its starting chunk');
+  assert(fc.includes('window.reviseFromChunk') && fc.includes('data-action="revise-from-chunk"')
+    && fc.includes("t('text_revision.chunk_revise_from')"),
+    'flashcards.js: the chunk panel must offer revising from this chunk onward, closing the panel first');
+  assert(fc.includes('practiceSummaryContinueButtons()'),
+    'flashcards.js: the continue buttons must be shared between the single and multi-chunk summaries');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+  assert(css.includes('.tr-chunk-separator') && css.includes('border-top:2px dashed'),
+    'style.css: the chunk separator must be a dashed line');
+  assert(css.includes('.tr-stop-section') && css.includes('.tr-multi-chunk-row'),
+    'style.css: the stop button section and the summary rows must be styled');
+  const del = fs.readFileSync(path.join(JS_DIR, 'delegation.js'), 'utf-8');
+  assert(del.includes("case 'start-text-practice-all-chunks': callWindow('startTextPracticeAllChunks', [getId(el)]);"),
+    'delegation.js: the new button must dispatch with the text id');
+  assert(del.includes("case 'submit-all-chunks-review': callWindow('submitAllChunksReview', []);")
+    && del.includes("case 'stop-all-chunks-review': callWindow('stopAllChunksReview', []);")
+    && del.includes("case 'toggle-chunk-summary-stats': callWindow('toggleChunkSummaryStats', [el]);"),
+    'delegation.js: the all-chunks submit, stop and summary-row actions must dispatch');
+  assert(del.includes("'start-text-practice-all-chunks': 1") && del.includes("'submit-all-chunks-review': 1")
+    && del.includes("'stop-all-chunks-review': 1") && del.includes("'toggle-chunk-summary-stats': 1"),
+    'delegation.js: the new actions must be allowed in read-only mode, like the single-chunk session');
+  assert(css.includes('.tr-multi-chunk-detail') && css.includes('.tr-multi-chunk-chevron'),
+    'style.css: the expandable row and its detail must be styled');
+  assert(del.includes("case 'revise-from-chunk': callWindow('reviseFromChunk', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]);"),
+    'delegation.js: the panel revise-from action must dispatch with text id and chunk index');
+  assert(del.includes("'revise-from-chunk': 1"),
+    'delegation.js: the revise-from action must be allowed in read-only mode');
+  assert(!del.includes('open-chunk-stats-from-summary'),
+    'delegation.js: the panel redirect action must be gone');
+  const i18n = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+  assert(i18n.includes('Revise all chunks') && i18n.includes('Réviser tous les blocs') && i18n.includes('Repasar todos los bloques')
+    && i18n.includes('Stop here — save progress') && i18n.includes('Chunks completed')
+    && i18n.includes('Revise from this chunk') && i18n.includes('Réviser à partir de ce bloc') && i18n.includes('Repasar desde este bloque')
+    && i18n.includes('From chunk {0} of {1}') && i18n.includes('À partir du bloc {0} sur {1}') && i18n.includes('Desde el bloque {0} de {1}'),
+    'i18n.js: the new labels must exist in all three locales');
 });
 
 // ===================================================================
@@ -2981,7 +3629,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     assert(sz > 5*1024, `CODEMAP.json suspiciously small: ${sz} bytes`);
   });
 
-  test('CODEMAP features include all 8 core features', () => {
+  test('CODEMAP features include all 7 core features', () => {
     const p = path.join(__dirname, '..', '.agents', 'CODEMAP.json');
     const j = JSON.parse(fs.readFileSync(p, 'utf-8'));
     const expected = ['todos','habits','projects','birthdays','flashcards','lists','welcome'];
@@ -3007,20 +3655,28 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   });
 
   test('CODEMAP freshness: committed JSON matches regenerated output', () => {
-    const tmp = path.join(__dirname, '..', '.agents', 'CODEMAP.json.tmp');
+    const { execSync } = require('child_process');
+    const codemapPath = path.join(__dirname, '..', '.agents', 'CODEMAP.json');
+    // Snapshot the committed file BEFORE regenerating, so a stale committed
+    // index fails instead of being silently refreshed. The old test ran the
+    // generator first and only checked the result was non-empty, which can
+    // never catch a --no-verify bypass (ADR 0007). generated_at changes on
+    // every run and is not a content change, so it is excluded from the
+    // comparison; everything else, including meta.version, must match.
+    const before = JSON.parse(fs.readFileSync(codemapPath, 'utf-8'));
+    if (before.meta) delete before.meta.generated_at;
+    let after;
     try {
-      const { execSync } = require('child_process');
-      execSync('node scripts/generate-codemap.js', { cwd: path.join(__dirname,'..'), stdio: 'pipe' });
-      // The generator overwrote the committed file (pre-commit would do same) — compare tmp if we want no overwrite?
-      // Since we just ran generator, committed file is now fresh by definition. To truly check freshness,
-      // we compare file content before and after — but here we already overwrote. So we re-generate to tmp
-      // by reading the file we just generated as source of truth and ensure it parses.
-      // For strict freshness in CI, run: git diff --exit-code .agents/CODEMAP.json
-      const raw = fs.readFileSync(path.join(__dirname,'..','.agents','CODEMAP.json'),'utf-8');
-      assert(raw.length>0, 'CODEMAP.json empty after regeneration');
+      execSync('node scripts/generate-codemap.js', { cwd: path.join(__dirname, '..'), stdio: 'pipe' });
+      after = JSON.parse(fs.readFileSync(codemapPath, 'utf-8'));
     } catch (e) {
-      throw new Error('Failed to regenerate CODEMAP: '+e.message);
+      throw new Error('Failed to regenerate CODEMAP: ' + e.message);
     }
+    if (after.meta) delete after.meta.generated_at;
+    // The generator is deterministic (ADR 0007), so key order is stable and
+    // a stringify comparison is a content comparison.
+    assert(JSON.stringify(before) === JSON.stringify(after),
+      'CODEMAP.json is stale — it has just been regenerated; commit the updated file');
   });
 
   // ===================================================================
@@ -4096,8 +4752,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'revision lines must carry their kind (mine/cue/dir)');
       assert(/const myLineCount = chunkLines\.filter\(l => l\.kind === 'mine'\)\.length/.test(flashJs),
         'submit must count only the role\'s own lines');
-      assert(flashJs.includes("if (kind !== 'mine') return;"),
-        'cue/direction lines must not toggle known/failed');
+      const { revealedLineClickAction } = loadTextPracticeLineHelpers();
+      assert(revealedLineClickAction('cue', false) === 'rollback'
+        && revealedLineClickAction('dir', false) === 'rollback',
+        'cue/direction lines must not toggle known/failed (a click rolls them back instead)');
     });
 
     test('scene pickers skip chunks with none of the role\'s lines', () => {
@@ -4673,13 +5331,15 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     test('free practice: submit skips scheduling updates', () => {
       const flashJs = jsFiles['flashcards.js'];
       const submitStart = flashJs.indexOf('window.submitTextReview = async function');
-      const submitBody = flashJs.slice(submitStart, flashJs.indexOf('window.showTextPracticeSummary', submitStart));
-      const freeIdx = submitBody.indexOf('if (trFreePractice)');
-      const fsrsIdx = submitBody.indexOf('fsrsUpdate');
-      assert(freeIdx !== -1 && fsrsIdx !== -1 && freeIdx < fsrsIdx,
-        'submitTextReview must branch to the free-practice summary before any FSRS update');
-      assert(/showFreePracticeSummary\(knownCount, totalLines\);\s*return;/.test(submitBody),
-        'free practice submit must not fall through to the scheduling path');
+      const submitBody = flashJs.slice(submitStart, flashJs.indexOf('window.submitAllChunksReview', submitStart));
+      assert(submitBody.includes('applyChunkReview(chunk, knownCount, totalLines, !trFreePractice)'),
+        'submitTextReview must pass the free-practice flag into the shared per-chunk scoring');
+      assert(/if \(trFreePractice\) \{\s*showFreePracticeSummary\(knownCount, totalLines, res\.nextScores\);\s*return;/.test(submitBody),
+        'free practice submit must show the free-practice summary and return before the scheduled one');
+      const applyStart = flashJs.indexOf('async function applyChunkReview');
+      const applyBody = flashJs.slice(applyStart, flashJs.indexOf('window.submitTextReview', applyStart));
+      assert(applyBody.indexOf('if (!scheduled)') !== -1 && applyBody.indexOf('if (!scheduled)') < applyBody.indexOf('fsrsUpdate'),
+        'applyChunkReview must return early for free practice before any FSRS update');
     });
 
     // Anki-style relearning (v2.32.102): a lapse puts the card into
@@ -9166,6 +9826,884 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    // ===================================================================
+    // List item attachments (v2.32.122)
+    // ===================================================================
+    function loadAttachmentHelpers() {
+      const listsJs = jsFiles['lists.js'];
+      const start = listsJs.indexOf('// ── Pure attachment helpers ──');
+      const end = listsJs.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in lists.js');
+      return new Function(`${listsJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, sharedListItemPayload, ownAttachmentFiles, referencedFileIdsFromItems, memberDisplayName, listItemMatchesSearch };`)();
+    }
+
+    test('lists: normalizeAttachments accepts string, array and missing; drops invalid entries', () => {
+      const { normalizeAttachments, serializeAttachments } = loadAttachmentHelpers();
+      const good = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' };
+      assert(JSON.stringify(normalizeAttachments(undefined)) === '[]', 'missing attachments must read as empty');
+      assert(JSON.stringify(normalizeAttachments(null)) === '[]', 'null attachments must read as empty');
+      assert(JSON.stringify(normalizeAttachments('[]')) === '[]', 'an empty JSON string must read as empty');
+      assert(JSON.stringify(normalizeAttachments(JSON.stringify([good]))) === JSON.stringify([good]),
+        'a JSON string (DB column shape) must parse to the same records');
+      assert(JSON.stringify(normalizeAttachments([good])) === JSON.stringify([good]),
+        'an array (sharing payload shape) must pass through');
+      const mixed = normalizeAttachments([
+        good,
+        { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'member-abc123', extra: 'stripped' },
+        { name: 'no-id.pdf', size: 10, url: 'https://drive.google.com/file/d/x/view', uploaded_by: 'member-abc123' },
+        { drive_file_id: 'f3', name: 'no-url.pdf', size: 10, uploaded_by: 'member-abc123' },
+        { drive_file_id: 'f4', name: 'neg.pdf', size: -1, url: 'https://drive.google.com/file/d/f4/view', uploaded_by: 'member-abc123' },
+        { drive_file_id: 'f5', name: 'nan.pdf', size: 'big', url: 'https://drive.google.com/file/d/f5/view', uploaded_by: 'member-abc123' },
+        'not-an-object',
+      ]);
+      assert(mixed.length === 2, `only valid records survive, got ${mixed.length}`);
+      assert(mixed[1].extra === undefined, 'extra fields must be stripped from the record');
+      assert(JSON.stringify(normalizeAttachments('not json')) === '[]', 'an unparseable string must read as empty');
+      assert(serializeAttachments([]) === null, 'an empty list must store NULL, like pre-migration rows');
+      assert(serializeAttachments([good]) === JSON.stringify([good]), 'a non-empty list must store a JSON string');
+      // uploaded_by is compulsory (v2.32.127): a record without a
+      // non-empty string uploader is invalid and is dropped, not kept
+      // unattributed — no attachment has ever been uploaded outside
+      // dev, so there are no legacy records to keep reading.
+      const { drive_file_id, name, size, url } = good;
+      assert(normalizeAttachments([{ drive_file_id, name, size, url }]).length === 0,
+        'a record without uploaded_by must be dropped');
+      assert(normalizeAttachments([{ ...good, uploaded_by: 42 }]).length === 0,
+        'a non-string uploaded_by must be dropped');
+      assert(normalizeAttachments([{ ...good, uploaded_by: '' }]).length === 0,
+        'an empty uploaded_by must be dropped');
+    });
+
+    test('lists: listItemMatchesSearch matches text, note and attachment names', () => {
+      const { listItemMatchesSearch } = loadAttachmentHelpers();
+      const item = {
+        text: 'Train ticket',
+        note: 'Booked for Friday',
+        attachments: [{ drive_file_id: 'f1', name: 'receipt.jpg', size: 1, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'me' }],
+      };
+      assert(listItemMatchesSearch(item, 'train') === true, 'text matches');
+      assert(listItemMatchesSearch(item, 'FRIDAY') === true, 'note matches, case-insensitive');
+      assert(listItemMatchesSearch(item, 'receipt') === true, 'an attachment file name matches');
+      assert(listItemMatchesSearch(item, 'RECEIPT.JPG') === true, 'the full file name matches, case-insensitive');
+      assert(listItemMatchesSearch(item, 'hotel') === false, 'no match anywhere means no match');
+      assert(listItemMatchesSearch(item, '') === true, 'an empty query matches everything');
+      assert(listItemMatchesSearch({ text: null, note: null, attachments: null }, 'x') === false, 'missing fields must not throw');
+      assert(listItemMatchesSearch({ text: 'a', attachments: [{ drive_file_id: 'f2', size: 1, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'me' }] }, 'a') === true, 'a nameless attachment must not throw');
+    });
+
+    test('lists: the Lists search filter uses listItemMatchesSearch', () => {
+      const listsSrc = jsFiles['lists.js'];
+      assert(listsSrc.includes('if (listSearchQuery && !listItemMatchesSearch(item, listSearchQuery)) return;'),
+        'the item filter must match text, note and attachment names');
+    });
+
+    test('lists: memberDisplayName resolves a member id, null when unknown', () => {
+      const { memberDisplayName } = loadAttachmentHelpers();
+      const members = [
+        { member_id: 'm1', display_name: 'Romain', invited_label: 'romain' },
+        { member_id: 'm2', display_name: '', invited_label: 'yassin' },
+        { member_id: 'm3' },
+      ];
+      assert(memberDisplayName(members, 'm1') === 'Romain', 'the display name wins');
+      assert(memberDisplayName(members, 'm2') === 'yassin', 'the invited label is the fallback');
+      assert(memberDisplayName(members, 'm3') === null, 'a member with no name at all resolves to nothing');
+      assert(memberDisplayName(members, 'gone') === null, 'an unknown id resolves to nothing, never a raw hash');
+      assert(memberDisplayName(null, 'm1') === null, 'no members means no name');
+    });
+
+    test('lists: attachment chips show the uploader in the tooltip on shared items', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const chipStart = listsSrc.indexOf('const attachmentsHtml');
+      const chipEnd = listsSrc.indexOf('\n  }\n', chipStart);
+      const chipFn = listsSrc.slice(chipStart, chipEnd);
+      assert(chipFn.includes('attachmentUploaderName(item, a.uploaded_by)'),
+        'each chip must resolve its uploader from the record');
+      assert(chipFn.includes("t('lists.attachment_uploaded_by', uploader)"),
+        'the tooltip must name the uploader');
+      const helperStart = listsSrc.indexOf('function attachmentUploaderName');
+      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
+      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      assert(helperFn.includes('state.sharing?.getGroup?.(item.shared_group_id)'),
+        'the uploader must resolve from the group row');
+      assert(helperFn.includes('if (!item?.shared_group_id || !uploadedBy) return null;'),
+        'personal items and unattributed records must show no uploader');
+      const i18n = jsFiles['i18n.js'];
+      assert(i18n.includes("attachment_uploaded_by: 'Uploaded by {0}'"), 'the tooltip needs its EN text');
+      assert(i18n.includes("attachment_uploaded_by: 'Ajoutée par {0}'"), 'the tooltip needs its FR text');
+      assert(i18n.includes("attachment_uploaded_by: 'Subido por {0}'"), 'the tooltip needs its ES text');
+    });
+
+    test('lists: referencedFileIdsFromItems collects references except the excluded items', () => {
+      const { referencedFileIdsFromItems } = loadAttachmentHelpers();
+      const a = { drive_file_id: 'f1', name: 'a.pdf', size: 1, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'me' };
+      const b = { drive_file_id: 'f2', name: 'b.pdf', size: 1, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'me' };
+      const items = [
+        { id: 'li-a', attachments: [a] },
+        { id: 'li-b', shared_id: 'sh-b', attachments: JSON.stringify([a, b]) },
+        { id: 'li-c', attachments: null },
+      ];
+      const all = referencedFileIdsFromItems(items, new Set());
+      assert(all.has('f1') && all.has('f2') && all.size === 2, 'every record on every item counts');
+      const withoutB = referencedFileIdsFromItems(items, new Set(['li-b']));
+      assert(withoutB.has('f1') && !withoutB.has('f2'), 'excluding by local id drops that item\u2019s references');
+      const withoutBShared = referencedFileIdsFromItems(items, new Set(['sh-b']));
+      assert(withoutBShared.has('f1') && !withoutBShared.has('f2'), 'excluding by shared id drops that item\u2019s references');
+      const withoutA = referencedFileIdsFromItems(items, new Set(['li-a', 'li-b']));
+      assert(withoutA.size === 0, 'excluding every referrer leaves nothing referenced');
+    });
+
+    test('sharing: folderTrashPlan spares referenced files and keeps the folder when one remains', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('function folderTrashPlan');
+      assert(start !== -1, 'could not find folderTrashPlan in adapters/drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of folderTrashPlan');
+      const { folderTrashPlan } = new Function(`${driveSrc.slice(start, end + 3)}; return { folderTrashPlan };`)();
+      const contents = [{ id: 'f1', name: 'a.pdf' }, { id: 'f2', name: 'b.pdf' }, { id: 'f3', name: 'c.pdf' }];
+      const plan = folderTrashPlan(contents, new Set(['f2']));
+      assert(JSON.stringify(plan.trashFileIds) === JSON.stringify(['f1', 'f3']), 'only unreferenced files are trashed');
+      assert(plan.trashFolder === false, 'the folder must stay when a referenced file remains inside it');
+      const clean = folderTrashPlan(contents, new Set());
+      assert(clean.trashFolder === true && clean.trashFileIds.length === 3, 'an unreferenced folder goes entirely');
+      const empty = folderTrashPlan([], new Set(['f2']));
+      assert(empty.trashFolder === true && empty.trashFileIds.length === 0, 'an empty folder goes');
+    });
+
+    test('lists: deleting or unchipping never trashes a file another item still references', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const helperStart = listsSrc.indexOf('async function trashOwnItemAttachments');
+      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
+      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      assert(helperFn.includes('if (referenced.has(a.drive_file_id)) continue;'),
+        'the trash helper must skip every file another item still references');
+      assert(helperFn.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'),
+        'the trash helper must hand the reference set to the folder trash');
+      const rmStart = listsSrc.indexOf('async function removeListItemAttachment');
+      const rmEnd = listsSrc.indexOf('\n}\n', rmStart);
+      const rmFn = listsSrc.slice(rmStart, rmEnd);
+      assert(rmFn.includes('referencedAttachmentFileIds(new Set([item.id, item.shared_id].filter(Boolean)))'),
+        'removing a chip must check whether another item still references the file');
+      assert(rmFn.includes('if (!referenced.has(driveFileId))'),
+        'removing a chip must skip the trash when the file is still referenced');
+      const listStart = listsSrc.indexOf('async function deleteList(');
+      const listEnd = listsSrc.indexOf('\n}\n', listStart);
+      const listFn = listsSrc.slice(listStart, listEnd);
+      assert(listFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+        'deleting a list must exclude the whole batch from the reference check');
+      const secStart = listsSrc.indexOf('async function deleteListSectionSubtree');
+      const secEnd = listsSrc.indexOf('\n}\n', secStart);
+      const secFn = listsSrc.slice(secStart, secEnd);
+      assert(secFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+        'deleting a section must exclude the whole subtree from the reference check');
+    });
+
+    test('lists: ownAttachmentFiles keeps only my files, nothing when the id is unknown', () => {
+      const { ownAttachmentFiles } = loadAttachmentHelpers();
+      const atts = [
+        { drive_file_id: 'f1', name: 'mine.pdf', size: 1, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'me' },
+        { drive_file_id: 'f2', name: 'theirs.pdf', size: 1, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'other' },
+        { drive_file_id: 'f3', name: 'mine2.pdf', size: 1, url: 'https://drive.google.com/file/d/f3/view', uploaded_by: 'me' },
+      ];
+      assert(JSON.stringify(ownAttachmentFiles(atts, 'me').map(a => a.drive_file_id)) === JSON.stringify(['f1', 'f3']),
+        'only files I uploaded may be trashed on delete');
+      assert(ownAttachmentFiles(atts, null).length === 0, 'an unresolvable id must trash nothing, never guess');
+      assert(ownAttachmentFiles(atts, undefined).length === 0, 'an undefined id must trash nothing');
+      assert(ownAttachmentFiles(null, 'me').length === 0, 'no attachments means nothing to trash');
+    });
+
+    test('lists: deleting an item or a chip trashes only my own files', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const delStart = listsSrc.indexOf('async function deleteListItem');
+      const delEnd = listsSrc.indexOf('// ── List item attachments', delStart);
+      const delFn = listsSrc.slice(delStart, delEnd);
+      assert(delFn.includes('await trashOwnItemAttachments(item)'),
+        'item deletion must trash only my own attachments');
+      assert(!delFn.includes("normalizeAttachments(item.attachments)) {\n        try { await state.driveAdapter?.trashAttachmentFile"),
+        'item deletion must not trash the unfiltered attachment list');
+      const helperStart = listsSrc.indexOf('async function trashOwnItemAttachments');
+      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
+      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      assert(helperFn.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'),
+        'the shared trash helper must still trash my own attachments folder');
+      const remStart = listsSrc.indexOf('async function removeListItemAttachment');
+      const remEnd = listsSrc.indexOf('// ===================================================================\n// CRUD — LISTS', remStart);
+      const remFn = listsSrc.slice(remStart, remEnd);
+      assert(remFn.includes('target.uploaded_by === myId'),
+        'removing a chip must trash the file only when it is mine');
+    });
+
+    test('sharing: revocablePermissionIds matches only listed emails', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const start = driveSrc.indexOf('function revocablePermissionIds');
+      assert(start !== -1, 'could not find revocablePermissionIds in sharing-drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of revocablePermissionIds');
+      const { revocablePermissionIds } = new Function(`${driveSrc.slice(start, end + 3)}; return { revocablePermissionIds };`)();
+      const perms = [
+        { id: 'p1', emailAddress: 'c@example.com', role: 'reader' },
+        { id: 'p2', emailAddress: 'd@example.com', role: 'reader' },
+        { id: 'p3', emailAddress: 'outsider@example.com', role: 'reader' },
+        { id: 'p4', role: 'reader' },
+      ];
+      assert(JSON.stringify(revocablePermissionIds(perms, new Set(['c@example.com', 'd@example.com']))) === JSON.stringify(['p1', 'p2']),
+        'only the group members\u2019 permissions are revoked — an outsider\u2019s grant stays');
+      assert(revocablePermissionIds(perms, new Set()).length === 0, 'no members means nothing to revoke');
+      assert(revocablePermissionIds(null, new Set(['c@example.com'])).length === 0, 'no permissions means nothing to revoke');
+    });
+
+    test('sharing: otherJoinedMemberIds and memberDisplayNameFromRoster read member_id, never id', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const load = (name) => {
+        const start = driveSrc.indexOf(`function ${name}`);
+        assert(start !== -1, `could not find ${name} in sharing-drive.js`);
+        const end = driveSrc.indexOf('\n}\n', start);
+        assert(end !== -1, `could not find the end of ${name}`);
+        return new Function(`${driveSrc.slice(start, end + 3)}; return { ${name} };`)()[name];
+      };
+      const otherJoinedMemberIds = load('otherJoinedMemberIds');
+      const memberDisplayNameFromRoster = load('memberDisplayNameFromRoster');
+      const roster = [
+        { member_id: 'me', status: 'joined', display_name: 'Antoine' },
+        { member_id: 'bob', status: 'joined', display_name: 'Bob' },
+        { member_id: 'carol', status: 'joined', invited_label: 'carol@example.com' },
+        { member_id: 'dave', status: 'pending', display_name: 'Dave' },
+        { member_id: 'erin', status: 'left', display_name: 'Erin' },
+        { status: 'joined', display_name: 'No id at all' },
+      ];
+      // The 006c30f review bug: reading .id yields undefined for every
+      // member, so the revoke matched nobody and the sweep toast named nobody.
+      assert(JSON.stringify(otherJoinedMemberIds(roster, 'me')) === JSON.stringify(['bob', 'carol']),
+        'only the other joined members count, by member_id — pending, left, self and id-less rows excluded');
+      assert(otherJoinedMemberIds(null, 'me').length === 0, 'no roster means no members');
+      assert(otherJoinedMemberIds(roster, null).length === 3, 'no self id means every joined member counts');
+      assert(memberDisplayNameFromRoster(roster, 'bob') === 'Bob', 'display_name resolves');
+      assert(memberDisplayNameFromRoster(roster, 'carol') === 'carol@example.com', 'invited_label is the fallback');
+      assert(memberDisplayNameFromRoster(roster, 'nobody') === '', 'an unknown id resolves to nothing, never a raw id');
+      // Regression guard: no member-roster lookup in the adapter may read .id.
+      assert(!driveSrc.includes(".filter(m => m.status === 'joined' && m.id"), 'the revoke must not filter the roster by .id');
+      assert(!driveSrc.includes('.find(m => m.id === id)'), 'the sweep must not look a member up by .id');
+      assert(driveSrc.includes('let others = new Set(otherJoinedMemberIds(e.group.members, myId));'),
+        'the revoke must build its member set from the member_id helper');
+      assert(driveSrc.includes('name: memberDisplayNameFromRoster(e.group.members, id)'),
+        'the sweep toast must resolve names through the member_id helper');
+    });
+
+    test('lists: a failed share rolls back the grants already issued, and only those', async () => {
+      const listsSrc = jsFiles['lists.js'];
+      const start = listsSrc.indexOf('async function shareAttachmentsWithGroup');
+      assert(start !== -1, 'could not find shareAttachmentsWithGroup in lists.js');
+      const rbStart = listsSrc.indexOf('async function rollbackAttachmentGrants', start);
+      assert(rbStart !== -1, 'could not find rollbackAttachmentGrants in lists.js');
+      const end = listsSrc.indexOf('\n}\n', rbStart);
+      assert(end !== -1, 'could not find the end of rollbackAttachmentGrants');
+      const makeFns = (sharing) => new Function('state',
+        `${listsSrc.slice(start, end + 3)}; return { shareAttachmentsWithGroup, rollbackAttachmentGrants };`)({ sharing });
+      const revoked = [];
+      const sharing = {
+        shareFileWithGroup: async (groupId, fileId) => {
+          if (fileId === 'fail') throw new Error('grant failed');
+          return [`m-${fileId}`];
+        },
+        revokeFileWithGroup: async (groupId, fileId, memberIds) => { revoked.push({ fileId, memberIds }); return memberIds; },
+      };
+      const { shareAttachmentsWithGroup, rollbackAttachmentGrants } = makeFns(sharing);
+      // All grants succeed: nothing revoked, granted lists only the newly granted.
+      const okResult = await shareAttachmentsWithGroup('g1', [{ drive_file_id: 'f1' }, { drive_file_id: 'f2' }]);
+      assert(okResult.ok === true, 'a clean share reports ok');
+      assert(JSON.stringify(okResult.granted) === JSON.stringify([{ fileId: 'f1', memberIds: ['m-f1'] }, { fileId: 'f2', memberIds: ['m-f2'] }]),
+        'granted records each file with exactly the members newly granted');
+      assert(revoked.length === 0, 'a clean share revokes nothing');
+      // The second grant fails: the first file's grants are revoked, the
+      // failed and never-attempted files are not.
+      const badResult = await shareAttachmentsWithGroup('g1', [{ drive_file_id: 'f1' }, { drive_file_id: 'fail' }, { drive_file_id: 'f2' }]);
+      assert(badResult.ok === false, 'a failed share reports not-ok');
+      assert(JSON.stringify(revoked) === JSON.stringify([{ fileId: 'f1', memberIds: ['m-f1'] }]),
+        'only the already-granted file is rolled back, with exactly its newly granted members');
+      // Rollback is best-effort: one failing revoke must not stop the others.
+      revoked.length = 0;
+      const flaky = {
+        revokeFileWithGroup: async (groupId, fileId) => {
+          if (fileId === 'f1') throw new Error('revoke failed');
+          revoked.push({ fileId });
+        },
+      };
+      await makeFns(flaky).rollbackAttachmentGrants('g1', [{ fileId: 'f1', memberIds: ['m-f1'] }, { fileId: 'f2', memberIds: ['m-f2'] }]);
+      assert(JSON.stringify(revoked) === JSON.stringify([{ fileId: 'f2' }]), 'a failed revoke is logged and the rest still roll back');
+      // The callers must roll back on every later failure, not just on a grant failure.
+      assert(listsSrc.includes('await rollBackGrantsOnce();'),
+        'share-existing must roll back exactly once on staging and upload failures');
+      assert(listsSrc.includes('await rollbackAttachmentGrants(groupId, shareResult.granted);'),
+        'bulk share must roll back on staging failures');
+      assert(listsSrc.includes('await rollbackAttachmentGrants(groupId, s.granted);'),
+        'bulk share must roll back a staged item whose upload later fails');
+      assert(listsSrc.includes("await rollbackAttachmentGrants(item.shared_group_id, [{ fileId: record.drive_file_id, memberIds: grantedIds }]);"),
+        'the upload path must roll back when the attach does not land');
+      // The targeted revoke must only touch the members passed in.
+      const driveSrc = jsFiles['sharing-drive.js'];
+      assert(driveSrc.includes('async revokeFileWithGroup(groupId, fileId, member_ids)'),
+        'revoke must accept an optional member_ids filter for rollback');
+      assert(driveSrc.includes('others = new Set([...others].filter(id => wanted.has(id)));'),
+        'the targeted revoke must intersect the joined members with the passed ids');
+    });
+
+    test('sharing: revoke on unshare is wired at the interface, the adapter, the cache and the unshare flow', () => {
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(iface.includes('revokeFileWithGroup:'), 'the sharing interface must declare revokeFileWithGroup');
+      const driveSrc = jsFiles['sharing-drive.js'];
+      assert(driveSrc.includes('async revokeFileWithGroup(groupId, fileId, member_ids)'), 'the Drive adapter must implement revokeFileWithGroup');
+      assert(driveSrc.includes('revocablePermissionIds(filePerms, new Set(idByEmail.keys()))'), 'the revoke must match permissions by group-member email');
+      const sharingJs = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingJs.includes("'revokeFileWithGroup',"), 'the cached sharing adapter must reject revokeFileWithGroup as read-only');
+      const listsSrc = jsFiles['lists.js'];
+      const unStart = listsSrc.indexOf('async function unshareListItem');
+      const unEnd = listsSrc.indexOf('window.unshareListItem = unshareListItem;', unStart);
+      const unFn = listsSrc.slice(unStart, unEnd);
+      assert(unFn.includes('revokeFileWithGroup?.(item.shared_group_id, a.drive_file_id)'), 'unsharing must revoke the group\u2019s access to my files');
+      assert(unFn.includes('ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))'), 'unsharing must revoke only my own files, never another member\u2019s');
+    });
+
+    test('lists: deleting a list or a section trashes each item the way item delete does', () => {
+      const listsSrc = jsFiles['lists.js'];
+      const delStart = listsSrc.indexOf('async function deleteListItem');
+      const delEnd = listsSrc.indexOf('// ── List item attachments', delStart);
+      const delFn = listsSrc.slice(delStart, delEnd);
+      assert(delFn.includes('await trashOwnItemAttachments(item)'), 'item deletion must use the shared trash helper');
+      assert(!delFn.includes('trashAttachmentFile?.('), 'item deletion must not keep its own inline trash loop');
+      const listStart = listsSrc.indexOf('async function deleteList(');
+      const listEnd = listsSrc.indexOf('\n}\n', listStart);
+      const listFn = listsSrc.slice(listStart, listEnd);
+      assert(listFn.includes('for (const item of items)') && listFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+        'deleting a list must trash my own attachments on every item in it');
+      const secStart = listsSrc.indexOf('async function deleteListSectionSubtree');
+      const secEnd = listsSrc.indexOf('\n}\n', secStart);
+      const secFn = listsSrc.slice(secStart, secEnd);
+      assert(secFn.includes('for (const item of itemRows)') && secFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+        'deleting a section must trash my own attachments on every item in the subtree');
+    });
+
+    test('sharing: keep-copies and the copy buttons carry the original attachments', () => {
+      const uiSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+      const convStart = uiSrc.indexOf('// ── List items ──', uiSrc.indexOf('async function _convertGroupItemsToPersonal'));
+      const convEnd = uiSrc.indexOf('// ── Events ──', convStart);
+      const conv = uiSrc.slice(convStart, convEnd);
+      assert(conv.includes('enriched.attachments = JSON.stringify(sh.payload.attachments)'),
+        'keep-copies must carry the original attachment records into the personal item');
+      const listsSrc = jsFiles['lists.js'];
+      const copyStart = listsSrc.indexOf('async function copyListItemToPersonal');
+      const copyEnd = listsSrc.indexOf('window.copyListItemToPersonal = copyListItemToPersonal;', copyStart);
+      const copyFn = listsSrc.slice(copyStart, copyEnd);
+      assert(copyFn.includes('attachments: serializeAttachments(item.attachments)'),
+        'copy-to-personal must carry the original attachment records into the copy');
+      const unStart = listsSrc.indexOf('async function unshareListItem');
+      const unEnd = listsSrc.indexOf('window.unshareListItem = unshareListItem;', unStart);
+      const unFn = listsSrc.slice(unStart, unEnd);
+      assert(unFn.includes('attachments: serializeAttachments(item.attachments)'),
+        'the unshare personal copy must carry the original attachment records');
+    });
+
+    test('lists: sharedListItemPayload carries attachments only when the item has any', () => {
+      const { sharedListItemPayload } = loadAttachmentHelpers();
+      const item = { text: 'Train ticket', note: 'refundable', attachments: [
+        { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' },
+      ] };
+      const payload = sharedListItemPayload(item, { name: 'Travel' });
+      assert(payload.text === 'Train ticket' && payload.list_name === 'Travel' && payload.note === 'refundable',
+        'the payload must keep text, list name and note');
+      assert(Array.isArray(payload.attachments) && payload.attachments.length === 1
+        && payload.attachments[0].drive_file_id === 'f1' && payload.attachments[0].uploaded_by === 'member-abc123',
+        'the payload must carry the attachment records with their uploader');
+      const bare = sharedListItemPayload({ text: 'x', note: '', attachments: [] }, { name: 'L' });
+      assert(!('attachments' in bare), 'an item without attachments must not gain an empty attachments key');
+      const missing = sharedListItemPayload({ text: 'x', note: '' }, null);
+      assert(missing.list_name === '' && !('attachments' in missing), 'a missing list and missing attachments must both read as empty');
+    });
+
+    test('lists: formatFileSize pins the unit boundaries', () => {
+      const { formatFileSize } = loadAttachmentHelpers();
+      assert(formatFileSize(0) === '0 B', '0 bytes');
+      assert(formatFileSize(512) === '512 B', '512 bytes');
+      assert(formatFileSize(1023) === '1023 B', '1023 bytes stays in B');
+      assert(formatFileSize(1024) === '1 KB', '1024 bytes is 1 KB');
+      assert(formatFileSize(1536) === '1.5 KB', '1536 bytes is 1.5 KB');
+      assert(formatFileSize(1048576) === '1 MB', '1 MiB is 1 MB');
+      assert(formatFileSize(2621440) === '2.5 MB', '2.5 MiB');
+      assert(formatFileSize(1073741824) === '1 GB', '1 GiB is 1 GB');
+    });
+
+    test('lists: attachment URLs are allowlisted to Drive', () => {
+      const { isDriveAttachmentUrl } = loadAttachmentHelpers();
+      assert(isDriveAttachmentUrl('https://drive.google.com/file/d/abc/view') === true, 'a Drive file link is allowed');
+      assert(isDriveAttachmentUrl('https://drive.google.com/drive/folders/abc') === true, 'a Drive folder link is allowed');
+      assert(isDriveAttachmentUrl('https://example.com/file.pdf') === false, 'an off-Drive link is refused');
+      assert(isDriveAttachmentUrl('javascript:alert(1)') === false, 'a javascript: URL is refused');
+      assert(isDriveAttachmentUrl(null) === false, 'a missing URL is refused');
+    });
+
+    test('drive: uniqueDriveFileName dedupes against the folder listing', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('// ── Pure attachment helpers ──');
+      const end = driveSrc.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in drive.js');
+      const { uniqueDriveFileName } = new Function(`${driveSrc.slice(start, end)}; return { uniqueDriveFileName };`)();
+      assert(uniqueDriveFileName('a.pdf', []) === 'a.pdf', 'no clash keeps the name');
+      assert(uniqueDriveFileName('a.pdf', ['a.pdf']) === 'a (1).pdf', 'one clash appends (1) before the extension');
+      assert(uniqueDriveFileName('a.pdf', ['a.pdf', 'a (1).pdf']) === 'a (2).pdf', 'two clashes append (2)');
+      assert(uniqueDriveFileName('notes', ['notes']) === 'notes (1)', 'an extensionless name dedupes at the end');
+      assert(uniqueDriveFileName('archive.tar.gz', ['archive.tar.gz']) === 'archive.tar (1).gz', 'only the last extension is split off');
+      assert(uniqueDriveFileName('.hidden', ['.hidden']) === '.hidden (1)', 'a leading dot is not an extension');
+    });
+
+    test('drive: claimAttachmentName claims names sequentially (v2.32.125)', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('// ── Pure attachment helpers ──');
+      const end = driveSrc.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in drive.js');
+      const { claimAttachmentName } = new Function(`${driveSrc.slice(start, end)}; return { claimAttachmentName };`)();
+      // The v2.32.124 flaw: picking receipt.pdf twice in one go yielded
+      // (1) and (2) with no plain name. Claiming fixes it.
+      const claimed = new Set();
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt.pdf', 'the first claim keeps the plain name');
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt (1).pdf', 'the second claim of the same name takes (1)');
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt (2).pdf', 'the third claim takes (2)');
+      assert(claimAttachmentName('receipt.pdf', ['receipt.pdf', 'receipt (1).pdf', 'receipt (2).pdf'], new Set()) === 'receipt (3).pdf',
+        'names already in the folder still count');
+      claimed.delete('receipt.pdf');
+      assert(claimAttachmentName('receipt.pdf', [], claimed) === 'receipt.pdf', 'releasing a claim frees the name again');
+    });
+
+    test('drive: findOrCreateItemAttachmentsFolder finds, then creates (v2.32.125)', async () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('async function findItemAttachmentsFolder');
+      const end = driveSrc.indexOf('async function findOrCreateItemAttachmentsFolder');
+      const fnEnd = driveSrc.indexOf('\n}\n', end) + 3;
+      assert(start !== -1 && end > start && fnEnd > end, 'could not slice the item folder helpers from drive.js');
+      const calls = [];
+      const fetchStub = async (url, init) => {
+        calls.push({ url, init });
+        if (init?.method === 'POST') {
+          return { ok: true, json: async () => ({ id: 'folder-created' }) };
+        }
+        // First search finds the folder, second search finds nothing.
+        return { ok: true, json: async () => ({ files: calls.filter(c => !c.init?.method).length === 1 ? [{ id: 'folder-found' }] : [] }) };
+      };
+      const { findOrCreateItemAttachmentsFolder } = new Function('fetch', `${driveSrc.slice(start, fnEnd)}; return { findOrCreateItemAttachmentsFolder };`)(fetchStub);
+      const found = await findOrCreateItemAttachmentsFolder('tok', 'shared-abc', 'attachments-folder');
+      assert(found === 'folder-found', 'an existing item folder must be returned without creating');
+      assert(calls.filter(c => c.init?.method === 'POST').length === 0, 'no create call when the folder exists');
+      const created = await findOrCreateItemAttachmentsFolder('tok', 'item-xyz', 'attachments-folder');
+      assert(created === 'folder-created', 'a missing item folder must be created');
+      const createCall = calls.find(c => c.init?.method === 'POST');
+      const body = JSON.parse(createCall.init.body);
+      assert(body.name === 'item-xyz' && body.parents[0] === 'attachments-folder' && body.mimeType === 'application/vnd.google-apps.folder',
+        'the created folder must be named by folder key under the attachments folder');
+      const searchUrl = decodeURIComponent(calls[0].url);
+      assert(searchUrl.includes("name='shared-abc'") && searchUrl.includes('trashed=false'),
+        'the search must query the folder key under the parent, excluding trashed folders');
+    });
+
+    test('migrations: list_items gains the attachments column in 2.32.122', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(/CREATE TABLE IF NOT EXISTS list_items \([^;]*attachments TEXT/.test(schema),
+        'schema.sql must add attachments TEXT to list_items');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.32.122'") && local.includes('ALTER TABLE list_items ADD COLUMN attachments TEXT'),
+        'the local migration must add the attachments column');
+      const driveMig = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(driveMig.includes("'2.32.122'") && driveMig.includes('list_items'),
+        'the Drive migration must normalize list_items attachments');
+    });
+
+    test('lists: attachment UI is wired, Drive-gated, and shared items carry the payload', () => {
+      const listsSrc = jsFiles['lists.js'];
+      assert(listsSrc.includes('data-action="attach-to-list-item"'), 'items must offer an attach button');
+      assert(listsSrc.includes('data-action="remove-list-item-attachment"'), 'attachment chips must offer removal');
+      assert(listsSrc.includes("typeof state.driveAdapter?.uploadAttachment === 'function'"),
+        'the attach button must hide without a Drive adapter');
+      assert(listsSrc.includes('list-item-attachments'), 'attachments must render as chips under the item');
+      assert(listsSrc.includes('item.attachments = normalizeAttachments(sh.payload?.attachments)'),
+        'shared items must read attachments from the sharing payload');
+      assert(listsSrc.includes("shareFileWithGroup(item.shared_group_id, record.drive_file_id, 'reader')"),
+        'an attachment on a shared item must be shared with the group before the payload update');
+      assert(listsSrc.includes('window.attachToListItem = attachToListItem'), 'the attach flow must be window-exposed for delegation');
+      assert(listsSrc.includes('window.removeListItemAttachment = removeListItemAttachment'), 'the remove flow must be window-exposed for delegation');
+      const delSrc = jsFiles['delegation.js'];
+      assert(delSrc.includes("case 'attach-to-list-item':"), 'delegation must route the attach action');
+      assert(delSrc.includes("case 'remove-list-item-attachment':"), 'delegation must route the remove action');
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      assert(driveSrc.includes('async uploadAttachment(file, {'), 'the Drive adapter must expose uploadAttachment');
+      assert(driveSrc.includes('async trashAttachmentFile(driveFileId)'), 'the Drive adapter must expose trashAttachmentFile');
+      assert(driveSrc.includes('ATTACHMENT_MULTIPART_MAX_BYTES = 5 * 1024 * 1024'), 'multipart uploads cap at 5 MB');
+      assert(driveSrc.includes('if (file.size > ATTACHMENT_MULTIPART_MAX_BYTES)'), 'files past the cap must take the resumable path');
+      assert(driveSrc.includes('uploadAttachmentFileResumable(tok, targetFolderId, file, name'), 'the resumable path must be wired into uploadAttachment');
+      assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
+      // uploaded_by (v2.32.126, compulsory v2.32.127): the queue stamps
+      // the uploader's group member id onto every upload; the adapter
+      // threads it into the record on both paths. The normalizer drops
+      // any record without it.
+      assert(listsSrc.includes('getCurrentMemberId(item.shared_group_id)'), 'the queue must read the uploader’s member id for shared items');
+      assert(listsSrc.includes('getCurrentUserMemberId()'), 'the queue must read the group-independent uploader id for personal items');
+      assert(listsSrc.includes('uploadedBy,'), 'the queue must pass uploadedBy to the adapter');
+      assert(listsSrc.includes("t('lists.attachment_no_uploader')"), 'a missing uploader id must refuse the upload with a toast, not orphan a file');
+      assert(driveSrc.includes('uploadedBy = null'), 'the adapter must accept uploadedBy in the upload opts');
+      assert(driveSrc.includes('const opts = { onProgress, signal, uploadedBy }'), 'the adapter must thread uploadedBy into the upload call');
+      assert(driveSrc.includes('attachmentRecordFromUpload(JSON.parse(res.responseText), file, uploadedBy)'), 'the resumable path must stamp uploaded_by on the record');
+      assert(driveSrc.includes('rec.uploaded_by = uploadedBy'), 'the multipart path must stamp uploaded_by on the record');
+      const ifaceSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(ifaceSrc.includes('getCurrentUserMemberId'), 'the sharing interface must expose the group-independent uploader id');
+      const sharingDriveSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+      assert(sharingDriveSrc.includes('async getCurrentUserMemberId()'), 'the Drive sharing adapter must implement the group-independent uploader id');
+      assert(sharingDriveSrc.includes('memberIdFromEmail(user.email)'), 'the uploader id must derive from the account email hash');
+      const sharingSrc = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingSrc.includes("getCurrentUserMemberId') stub[key] = async () => 'demo'"), 'the demo stub must return a member id for the uploader');
+      // Sharing an existing item carries its attachments (v2.32.129):
+      // the files are shared reader first, the records ride the payload.
+      const shareStart = listsSrc.indexOf('async function shareExistingListItem');
+      const shareEnd = listsSrc.indexOf('window.shareExistingListItem');
+      const shareFn = listsSrc.slice(shareStart, shareEnd);
+      assert(shareFn.includes('sharedListItemPayload(item, listObj)'), 'the single-item share must build its payload through the shared helper');
+      assert(shareFn.includes('shareAttachmentsWithGroup(groupId, attachments)'), 'the single-item share must grant the files before publishing');
+      assert(shareFn.indexOf('shareAttachmentsWithGroup(groupId, attachments)') < shareFn.indexOf('state.sharing.addItem'),
+        'the file grants must come before the shared item is staged');
+      assert(shareFn.includes("t('lists.share_attachments_failed')"), 'a file-share failure must abort the single-item share with a toast');
+      const bulkStart = listsSrc.indexOf('async function bulkShareList');
+      const bulkEnd = listsSrc.indexOf('window.bulkShareList');
+      const bulkFn = bulkStart !== -1 ? listsSrc.slice(bulkStart, bulkEnd === -1 ? undefined : bulkEnd) : '';
+      assert(bulkFn.includes('sharedListItemPayload(item, listObj)'), 'the bulk share must build its payload through the shared helper');
+      assert(bulkFn.includes('shareAttachmentsWithGroup(groupId, attachments)'), 'the bulk share must grant the files before publishing');
+      assert(bulkFn.indexOf('shareAttachmentsWithGroup(groupId, attachments)') < bulkFn.indexOf('state.sharing.addItem'),
+        'the bulk share must grant the files before the shared item is staged');
+      assert(bulkFn.includes('continue;'), 'a file-share failure must skip that item in the bulk share');
+      // Per-item folders (v2.32.125): each item gets its own subfolder,
+      // and names are claimed sequentially instead of deduping against
+      // the other files' raw names.
+      assert(driveSrc.includes('async trashItemAttachmentsFolder(itemId, referencedIds = new Set())'), 'the Drive adapter must expose trashItemAttachmentsFolder');
+      assert(driveSrc.includes('async function findOrCreateItemAttachmentsFolder(token, folderKey, parentFolderId)'), 'per-item folders must be found or created');
+      assert(driveSrc.includes('async function findAttachmentsFolder(token, parentFolderId)'), 'the parent folder must be findable without creating it');
+      assert(driveSrc.includes('function claimAttachmentName(fileName, takenNames, claimed)'), 'names must be claimed, not deduped against raw names');
+      assert(!driveSrc.includes('inFlightNames'), 'the raw-name in-flight dedupe must be gone from the adapter');
+      assert(!listsSrc.includes('inFlightNames'), 'the raw-name in-flight dedupe must be gone from the caller');
+      assert(listsSrc.includes('item.shared_id || item.id'), 'the folder key must be the shared_id for shared items, the local id otherwise');
+      assert(listsSrc.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'), 'deleting an item must trash its attachments folder');
+      // Progress: the transfer runs over XHR (fetch cannot report upload
+      // progress), in 1 MB chunks for the resumable path.
+      assert(driveSrc.includes('new XMLHttpRequest()'), 'the upload transport must be XHR for progress events');
+      assert(driveSrc.includes('ATTACHMENT_CHUNK_BYTES = 1024 * 1024'), 'resumable uploads must chunk at 1 MB');
+      assert(driveSrc.includes('Content-Range'), 'resumable chunks must carry a Content-Range');
+      assert(driveSrc.includes("err.code = 'aborted'"), 'an aborted upload must reject with code aborted');
+      assert(!driveSrc.includes('attachment_too_large'), 'the adapter must no longer refuse large files');
+      assert(!listsSrc.includes('attachment_too_large'), 'the caller must no longer toast a size refusal');
+      assert(!listsSrc.includes('_pendingAttachmentUploads'), 'the per-item upload block must be replaced by the pending queue');
+      assert(listsSrc.includes('_pendingAttachments'), 'pending uploads must live in a per-item map');
+      assert(listsSrc.includes('processAttachmentQueue'), 'picked files must drain through a per-item queue');
+      assert(listsSrc.includes('attachmentProgressRing'), 'pending chips must render a progress ring');
+      assert(listsSrc.includes('updateAttachmentProgress'), 'progress must patch the ring in place');
+      assert(listsSrc.includes('data-pending-id'), 'pending chips must be addressable by pending id');
+      assert(delSrc.includes("case 'cancel-list-item-attachment':"), 'delegation must route the cancel action');
+      assert(delSrc.includes("case 'retry-list-item-attachment':"), 'delegation must route the retry action');
+      assert(listsSrc.includes('window.cancelListItemAttachment = cancelListItemAttachment'), 'cancel must be window-exposed for delegation');
+      assert(listsSrc.includes('window.retryListItemAttachment = retryListItemAttachment'), 'retry must be window-exposed for delegation');
+      assert(listsSrc.includes('new AbortController()'), 'each pending upload must own an AbortController');
+      const styleSrc = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(styleSrc.includes('.att-progress-ring'), 'the ring must be styled');
+      assert(styleSrc.includes('.list-attachment-chip.pending'), 'pending chips must be styled');
+      assert(styleSrc.includes('.list-attachment-chip.error'), 'failed chips must be styled');
+      assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(iface.includes('shareFileWithGroup:'), 'the sharing interface must declare shareFileWithGroup');
+      const sharingDrive = fs.readFileSync(path.join(JS_DIR, 'sharing-drive.js'), 'utf-8');
+      assert(sharingDrive.includes('async shareFileWithGroup(groupId, fileId, role'), 'the Drive sharing adapter must implement shareFileWithGroup');
+      const sharingJs = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingJs.includes("'shareFileWithGroup',"), 'the cached sharing adapter must reject shareFileWithGroup as read-only');
+      // The keys are picked by variable in places, so the t()-scan test
+      // cannot see them all — pin their presence in all three locales directly.
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed', 'cancel_upload', 'retry_upload', 'attachment_no_uploader', 'share_attachments_failed']) {
+        const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
+        assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
+      }
+    });
+
+    test('sharing: the sweep toasts the file owner when it grants a new member', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const sweepStart = driveSrc.indexOf('async sweepAttachmentGrants(groupId)');
+      const sweepEnd = driveSrc.indexOf('\n    },', sweepStart);
+      const sweepFn = driveSrc.slice(sweepStart, sweepEnd);
+      assert(sweepFn.includes("emit('attachment-grants-swept'"), 'the sweep must emit when it grants files');
+      assert(sweepFn.includes('if (memberIds.length)'), 'the sweep must stay silent when nothing was granted');
+      assert(sweepFn.includes('memberDisplayNameFromRoster(e.group.members, id)'), 'the toast must resolve the new member name from the group row by member_id');
+      const mainJs = jsFiles['main.js'];
+      assert(mainJs.includes("event === 'attachment-grants-swept'"), 'main must listen for the sweep event');
+      assert(mainJs.includes('sharing.attachments_shared_with_new_member'), 'the sweep toast must use the new i18n key');
+      const i18n = jsFiles['i18n.js'];
+      assert((i18n.match(/attachments_shared_with_new_member/g) || []).length === 3,
+        'the sweep toast key must exist in all three locales');
+    });
+
+    test('sharing: ownAttachmentFileIds collects only my files, deduped', () => {
+      const driveSrc = jsFiles['sharing-drive.js'];
+      const start = driveSrc.indexOf('function ownAttachmentFileIds');
+      assert(start !== -1, 'could not find ownAttachmentFileIds in sharing-drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of ownAttachmentFileIds');
+      const { ownAttachmentFileIds } = new Function(`${driveSrc.slice(start, end + 3)}; return { ownAttachmentFileIds };`)();
+      const items = [
+        { id: 'a', payload: { attachments: [
+          { drive_file_id: 'f1', name: 'a.pdf', uploaded_by: 'me' },
+          { drive_file_id: 'f2', name: 'b.pdf', uploaded_by: 'other' },
+        ] } },
+        { id: 'b', payload: { attachments: [
+          { drive_file_id: 'f1', name: 'a.pdf', uploaded_by: 'me' },
+          { drive_file_id: 'f3', name: 'c.pdf', uploaded_by: 'me' },
+        ] } },
+        { id: 'c', payload: { text: 'no attachments' } },
+        { id: 'd', payload: { attachments: 'not-an-array' } },
+        { id: 'e' },
+      ];
+      assert(JSON.stringify(ownAttachmentFileIds(items, 'me').sort()) === JSON.stringify(['f1', 'f3']),
+        'the sweep must collect my files only, once each, ignoring other members and malformed payloads');
+      assert(ownAttachmentFileIds(items, null).length === 0, 'no member id means no files to sweep');
+      assert(ownAttachmentFileIds(null, 'me').length === 0, 'no items means no files to sweep');
+    });
+
+    test('sharing: the attachment grant sweep is wired at the interface, the adapter, the cache and both triggers', () => {
+      const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
+      assert(iface.includes('sweepAttachmentGrants:'), 'the sharing interface must declare sweepAttachmentGrants');
+      const driveSrc = jsFiles['sharing-drive.js'];
+      assert(driveSrc.includes('async sweepAttachmentGrants(groupId)'), 'the Drive adapter must implement sweepAttachmentGrants');
+      assert(driveSrc.includes("ownAttachmentFileIds(e.typeData['lists'] || [], myId)"), 'the sweep must scan my list-item payloads');
+      assert(driveSrc.includes("this.shareFileWithGroup(groupId, fileId, 'reader')"), 'the sweep must grant each file reader');
+      // Load-time trigger: post-load repairs in loadAll.
+      const loadStart = driveSrc.indexOf('async loadAll()');
+      const loadEnd = driveSrc.indexOf('getAllGroups()', loadStart);
+      const loadFn = driveSrc.slice(loadStart, loadEnd);
+      assert(loadFn.includes('this.sweepAttachmentGrants(gid)'), 'loadAll must sweep each loaded group for members who joined while away');
+      // Poll trigger: fresh joins.
+      assert(driveSrc.includes('if (freshJoins.length) this.sweepAttachmentGrants(groupId)'), 'the poll must sweep when it spots a fresh join');
+      const sharingJs = fs.readFileSync(path.join(JS_DIR, 'sharing.js'), 'utf-8');
+      assert(sharingJs.includes("'sweepAttachmentGrants',"), 'the cached sharing adapter must reject sweepAttachmentGrants as read-only');
+    });
+
+    // Slice the real upload functions out of drive.js and run them
+    // against a fake fetch + a fake XHR (same new Function idiom as the
+    // pure-helper tests). The fake answers from a script queue, one
+    // entry per XHR send, in order.
+    function loadUploadFns() {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('function xhrRequest');
+      assert(start !== -1, 'could not find xhrRequest in drive.js');
+      const resStart = driveSrc.indexOf('async function uploadAttachmentFileResumable');
+      assert(resStart !== -1, 'could not find uploadAttachmentFileResumable in drive.js');
+      const end = driveSrc.indexOf('\n}\n', resStart);
+      assert(end !== -1, 'could not find the end of uploadAttachmentFileResumable');
+      return new Function('fetch', 'XMLHttpRequest', `${driveSrc.slice(start, end + 3)}; return { uploadAttachmentFile, uploadAttachmentFileResumable };`);
+    }
+    function makeFakeXHR(script) {
+      const instances = [];
+      class FakeXHR {
+        constructor() {
+          this.headers = {};
+          this.upload = {};
+          instances.push(this);
+        }
+        open(method, url) { this.method = method; this.url = url; }
+        setRequestHeader(k, v) { this.headers[k.toLowerCase()] = v; }
+        getResponseHeader(h) { return (this._respHeaders || {})[h.toLowerCase()] || null; }
+        abort() { this._aborted = true; if (this.onabort) this.onabort(); }
+        send(body) {
+          this.body = body;
+          const step = script.shift();
+          setTimeout(() => {
+            if (this._aborted) return;
+            if (!step) throw new Error('FakeXHR: no scripted response left');
+            if (step.progress) for (const p of step.progress) this.upload.onprogress?.({ lengthComputable: true, loaded: p.loaded, total: p.total });
+            if (step.error) { if (this.onerror) this.onerror(); return; }
+            this.status = step.status;
+            this.responseText = step.responseText || '';
+            this._respHeaders = {};
+            for (const [k, v] of Object.entries(step.headers || {})) this._respHeaders[k.toLowerCase()] = v;
+            if (this.onload) this.onload();
+          }, 0);
+        }
+      }
+      return { FakeXHR, instances };
+    }
+    const resumableSessionFetch = (url, opts) => {
+      if (!url.includes('uploadType=resumable')) throw new Error('unexpected fetch: ' + url);
+      return Promise.resolve({ ok: true, status: 200, headers: { get: (h) => (h === 'Location' ? 'https://upload.session/abc123' : null) }, text: async () => '' });
+    };
+    const resumableResource = { id: 'res-1', name: 'big.bin', size: '2621440', webViewLink: 'https://drive.google.com/file/d/res-1/view' };
+
+    test('drive: multipart upload goes over XHR with progress', async () => {
+      const file = new File(['hello'], 'a.txt', { type: 'text/plain' });
+      const script = [{ status: 200, responseText: JSON.stringify({ id: 'm-1', name: 'a.txt', size: '5', webViewLink: 'https://drive.google.com/file/d/m-1/view' }), progress: [{ loaded: 3, total: 10 }, { loaded: 10, total: 10 }] }];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const load = loadUploadFns();
+      const fractions = [];
+      const record = await load(async () => { throw new Error('multipart must not fetch'); }, FakeXHR).uploadAttachmentFile('tok', 'folder-1', file, 'a.txt', { onProgress: (f) => fractions.push(f) });
+      assert(instances.length === 1, `multipart must make exactly one XHR call, got ${instances.length}`);
+      const xhr = instances[0];
+      assert(xhr.method === 'POST' && xhr.url.includes('uploadType=multipart'), 'the call must POST to the multipart endpoint');
+      assert(xhr.headers.authorization === 'Bearer tok', 'the call must carry the token');
+      assert(xhr.body instanceof FormData, 'the body must be FormData');
+      assert(fractions.length === 2 && fractions[1] === 1, `progress must be reported, ending at 1, got ${JSON.stringify(fractions)}`);
+      assert(record.drive_file_id === 'm-1' && record.url.endsWith('/m-1/view'), 'the record must come from the upload response');
+    });
+
+    test('drive: resumable upload sends 1 MB chunks with Content-Range and reports progress', async () => {
+      const file = new File(['x'.repeat(2621440)], 'big.bin', { type: 'video/mp4' });
+      const script = [
+        { status: 308, headers: { range: 'bytes=0-1048575' }, progress: [{ loaded: 524288, total: 1048576 }, { loaded: 1048576, total: 1048576 }] },
+        { status: 308, headers: { range: 'bytes=0-2097151' } },
+        { status: 200, responseText: JSON.stringify(resumableResource) },
+      ];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const fetchCalls = [];
+      const fakeFetch = (url, opts) => { fetchCalls.push({ url, opts }); return resumableSessionFetch(url, opts); };
+      const fractions = [];
+      const record = await loadUploadFns()(fakeFetch, FakeXHR)
+        .uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', { onProgress: (f) => fractions.push(f) });
+      assert(fetchCalls.length === 1, 'the session must be initiated once');
+      assert(fetchCalls[0].url.includes('uploadType=resumable'), 'the initiation must use the resumable endpoint');
+      assert(fetchCalls[0].opts.headers['X-Upload-Content-Length'] === '2621440', 'the session must declare the file size');
+      const meta = JSON.parse(fetchCalls[0].opts.body);
+      assert(meta.name === 'big.bin' && meta.parents[0] === 'folder-1', 'the session metadata must carry the name and folder');
+      assert(instances.length === 3, `a 2.5 MB file must take 3 chunk PUTs, got ${instances.length}`);
+      assert(instances.every(x => x.method === 'PUT' && x.url === 'https://upload.session/abc123'), 'chunks must PUT to the session URI');
+      assert(instances[0].headers['content-range'] === 'bytes 0-1048575/2621440', 'chunk 1 must declare its byte range');
+      assert(instances[1].headers['content-range'] === 'bytes 1048576-2097151/2621440', 'chunk 2 must declare its byte range');
+      assert(instances[2].headers['content-range'] === 'bytes 2097152-2621439/2621440', 'chunk 3 must declare its byte range');
+      assert(instances[0].body.size === 1048576 && instances[1].body.size === 1048576 && instances[2].body.size === 524288,
+        'chunk bodies must be the file slices');
+      assert(!('authorization' in instances[0].headers), 'chunk PUTs must not carry the token (the session URI authenticates)');
+      assert(fractions.length >= 3 && fractions[fractions.length - 1] === 1, `progress must rise and end at 1, got ${JSON.stringify(fractions)}`);
+      assert(fractions.every((f, i) => i === 0 || f >= fractions[i - 1]), 'progress must never go backwards');
+      assert(record.drive_file_id === 'res-1' && record.size === 2621440 && record.url === 'https://drive.google.com/file/d/res-1/view',
+        'the record must come from the final chunk response');
+    });
+
+    test('drive: a failed chunk retries, then resumes from the session status', async () => {
+      const file = new File(['x'.repeat(2621440)], 'big.bin', { type: 'video/mp4' });
+      // Chunk 2's PUTs fail three times with their responses lost — but
+      // the server did receive the bytes, so the status query reports
+      // them and the upload resumes at chunk 3 instead of restarting.
+      const script = [
+        { status: 308, headers: { range: 'bytes=0-1048575' } },
+        { error: true }, { error: true }, { error: true }, // chunk 2: responses lost
+        { status: 308, headers: { range: 'bytes=0-2097151' } }, // status query: chunk 2 confirmed
+        { status: 200, responseText: JSON.stringify(resumableResource) },
+      ];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const record = await loadUploadFns()(resumableSessionFetch, FakeXHR)
+        .uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {});
+      assert(instances.length === 6, `expected 6 XHR calls, got ${instances.length}`);
+      const ranges = instances.map(x => x.headers['content-range']);
+      assert(ranges.filter(r => r === 'bytes 1048576-2097151/2621440').length === 3,
+        `chunk 2 must be attempted 3 times, got ${JSON.stringify(ranges)}`);
+      assert(ranges.includes('bytes */2621440'), 'the resume must ask the session how far it got');
+      assert(ranges.includes('bytes 2097152-2621439/2621440'), 'the upload must resume at chunk 3');
+      assert(record.drive_file_id === 'res-1', 'the upload must complete after the resume');
+    });
+
+    test('drive: aborting mid-upload rejects with code aborted and starts no new chunk', async () => {
+      const file = new File(['x'.repeat(2621440)], 'big.bin', { type: 'video/mp4' });
+      const script = [
+        { status: 308, headers: { range: 'bytes=0-1048575' }, progress: [{ loaded: 786432, total: 1048576 }] },
+        { status: 308, headers: { range: 'bytes=0-2097151' } },
+        { status: 200, responseText: JSON.stringify(resumableResource) },
+      ];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const ctl = new AbortController();
+      let err;
+      try {
+        await loadUploadFns()(resumableSessionFetch, FakeXHR)
+          .uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {
+            signal: ctl.signal,
+            onProgress: (f) => { if (f > 0.2) ctl.abort(); },
+          });
+      } catch (e) { err = e; }
+      assert(err && err.code === 'aborted', `an abort must reject with code aborted, got ${err && err.code}`);
+      assert(instances.length === 1, `no further chunk must start after the abort, got ${instances.length} XHR calls`);
+    });
+
+    test('drive: resumable upload refuses a missing session URI and a refused initiation', async () => {
+      const file = new File(['x'.repeat(1024)], 'big.bin', { type: 'video/mp4' });
+      const load = loadUploadFns();
+      const { FakeXHR } = makeFakeXHR([]);
+      const noSession = async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '' });
+      let err;
+      try { await load(noSession, FakeXHR).uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {}); } catch (e) { err = e; }
+      assert(err && /no session URI/.test(err.message), 'a missing session URI must throw');
+      const badInit = async () => ({ ok: false, status: 400, headers: { get: () => null }, text: async () => 'bad request' });
+      err = null;
+      try { await load(badInit, FakeXHR).uploadAttachmentFileResumable('tok', 'folder-1', file, 'big.bin', {}); } catch (e) { err = e; }
+      assert(err && /400/.test(err.message), 'a refused initiation must throw with the status');
+    });
+
+    test('drive: a zero-byte file completes with one empty PUT', async () => {
+      const file = new File([], 'empty.txt', { type: 'text/plain' });
+      const script = [{ status: 200, responseText: JSON.stringify({ id: 'e-1', name: 'empty.txt', size: '0', webViewLink: 'https://drive.google.com/file/d/e-1/view' }) }];
+      const { FakeXHR, instances } = makeFakeXHR(script);
+      const record = await loadUploadFns()(resumableSessionFetch, FakeXHR)
+        .uploadAttachmentFileResumable('tok', 'folder-1', file, 'empty.txt', {});
+      assert(instances.length === 1, 'a zero-byte file must take exactly one PUT');
+      assert(instances[0].headers['content-range'] === 'bytes */0', 'the empty PUT must use the status-query range');
+      assert(record.drive_file_id === 'e-1' && record.size === 0, 'the record must come back with size 0');
+    });
+
+    test('drive: attachmentRecordFromUpload stamps uploaded_by only when given', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      const start = driveSrc.indexOf('function attachmentRecordFromUpload');
+      assert(start !== -1, 'could not find attachmentRecordFromUpload in drive.js');
+      const end = driveSrc.indexOf('\n}\n', start);
+      assert(end !== -1, 'could not find the end of attachmentRecordFromUpload');
+      const { attachmentRecordFromUpload } = new Function(`${driveSrc.slice(start, end + 3)}; return { attachmentRecordFromUpload };`)();
+      const result = { id: 'f1', name: 'a.pdf', size: '120', webViewLink: 'https://drive.google.com/file/d/f1/view' };
+      const file = { size: 120 };
+      const withUploader = attachmentRecordFromUpload(result, file, 'member-abc123');
+      assert(withUploader.uploaded_by === 'member-abc123', 'the uploader id must be stamped on the record');
+      assert(withUploader.drive_file_id === 'f1' && withUploader.size === 120, 'the rest of the record must be unchanged');
+      assert(attachmentRecordFromUpload(result, file, null).uploaded_by === undefined, 'no uploader must mean no key');
+      assert(attachmentRecordFromUpload(result, file).uploaded_by === undefined, 'an omitted uploader must mean no key');
+      assert(attachmentRecordFromUpload(result, file, '').uploaded_by === undefined, 'an empty uploader must mean no key');
+    });
+
+    test('demo data: a sampled list item carries two attachments', () => {
+      const demo = fs.readFileSync(path.join(__dirname, '..', 'js', 'demo-data.js'), 'utf-8');
+      const lines = demo.split('\n').filter(l => l.includes("id: 'demo-li-007'"));
+      assert(lines.length === 3, `expected the train-ticket item in all three languages, got ${lines.length}`);
+      assert(lines.every(l => /attachments: \[/.test(l)), 'each copy must carry attachments');
+      assert(lines.every(l => /drive\.google\.com\/file\/d\/demo-train-ticket\/view/.test(l)), 'the demo attachment must link to a Drive file');
+      const { normalizeAttachments } = loadAttachmentHelpers();
+      const sample = [{ drive_file_id: 'demo-attachment-001', name: 'train-ticket.pdf', size: 184320, url: 'https://drive.google.com/file/d/demo-train-ticket/view', uploaded_by: 'demo' }];
+      assert(normalizeAttachments(sample).length === 1, 'the demo attachment record must survive normalization');
+    });
+
+    test('demo: list_items attachments round-trip through the adapter as a JSON string', async () => {
+      const { pathToFileURL } = require('url');
+      const demo = await import(pathToFileURL(path.join(JS_DIR, 'adapters/demo.js')).href);
+      const { createDemoAdapter } = demo;
+      const exec = (builder) => {
+        let out, err;
+        builder.then(r => { out = r; }, e => { err = e; });
+        if (err) throw err;
+        return out;
+      };
+      const { normalizeAttachments, serializeAttachments } = loadAttachmentHelpers();
+      const db = createDemoAdapter({});
+      const record = { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' };
+      exec(db.from('list_items').insert({ id: 'li-1', list_id: 'l1', text: 'x', attachments: serializeAttachments([record]) }));
+      const read = exec(db.from('list_items').select('*').eq('id', 'li-1'));
+      assert(normalizeAttachments(read.data[0].attachments).length === 1, 'a stored JSON string must read back as one attachment');
+      const record2 = { drive_file_id: 'f2', name: 'b.pdf', size: 10, url: 'https://drive.google.com/file/d/f2/view', uploaded_by: 'member-abc123' };
+      exec(db.from('list_items').update({ attachments: serializeAttachments([record, record2]) }).eq('id', 'li-1'));
+      const read2 = exec(db.from('list_items').select('*').eq('id', 'li-1'));
+      assert(normalizeAttachments(read2.data[0].attachments).length === 2, 'a second attachment must persist alongside the first');
+      exec(db.from('list_items').update({ attachments: serializeAttachments([]) }).eq('id', 'li-1'));
+      const read3 = exec(db.from('list_items').select('*').eq('id', 'li-1'));
+      assert(normalizeAttachments(read3.data[0].attachments).length === 0, 'removing the last attachment must leave none');
+      assert(read3.data[0].attachments === null, 'an empty list must store NULL, not "[]"');
+    });
+
     test('sections-pure: planNodeMove — append, positional insert, cycle and name rules', async () => {
       const m = await import(pathToFileURL(path.join(JS_DIR, 'sections-pure.js')).href);
       const rows = [
@@ -9362,6 +10900,538 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'both deck renderers (flashcards + texts) must place the Practice button outside the hover-revealed actions');
     });
   }
+
+  // ===================================================================
+  // Chrome extension (spec §8 step 4 — popup)
+  // ===================================================================
+  // The stamped outputs under extension/dist/ are the loadable
+  // artifacts; these tests assert on them, not on the src templates.
+  const EXT_DIST = path.join(__dirname, '..', 'extension', 'dist');
+  const EXT_PROD = path.join(EXT_DIST, 'prod');
+  const EXT_DEV = path.join(EXT_DIST, 'dev');
+
+  function readRepoVersion() {
+    const text = fs.readFileSync(path.join(__dirname, '..', 'VERSION'), 'utf8');
+    const m = text.match(/^latest=(.+)$/m);
+    assert(m, 'VERSION must have a latest= line');
+    return m[1].trim();
+  }
+
+  // Independent re-implementation of Chrome's extension-ID derivation
+  // (first 128 bits of the SHA-256 of the DER public key, hex nibbles
+  // 0-f mapped to letters a-p) — the test must not trust the packager's
+  // copy of the same function.
+  function deriveExtensionId(base64Key) {
+    const der = Buffer.from(base64Key, 'base64');
+    const hex = crypto.createHash('sha256').update(der).digest('hex').slice(0, 32);
+    return [...hex].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join('');
+  }
+
+  test('extension: both stamped manifests parse with the right names and repo version', () => {
+    const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
+    const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));
+    assert(prod.name === 'DeLaClaw', 'prod manifest name must be DeLaClaw');
+    assert(dev.name === 'DeLaClaw Dev', 'dev manifest name must be DeLaClaw Dev');
+    const version = readRepoVersion();
+    assert(prod.version === version, `prod manifest version must equal repo VERSION (${version})`);
+    assert(dev.version === version, `dev manifest version must equal repo VERSION (${version})`);
+    assert(prod.manifest_version === 3 && dev.manifest_version === 3, 'both manifests must be MV3');
+    assert(prod.background?.service_worker === 'service-worker.js' && prod.background?.type === 'module',
+      'prod background must be the module service worker');
+    assert(prod.action?.default_popup === 'popup.html', 'prod action must open popup.html');
+  });
+
+  test('extension: manifests carry no oauth2 block and the spec permissions only', () => {
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+      assert(!('oauth2' in m), 'manifest must not carry an oauth2 block (the web client is used at runtime)');
+      assert(JSON.stringify([...m.permissions].sort()) === JSON.stringify(['activeTab', 'contextMenus', 'identity', 'storage']),
+        `permissions must be exactly identity/contextMenus/storage/activeTab, got ${m.permissions}`);
+      assert(JSON.stringify([...m.host_permissions].sort()) === JSON.stringify(['https://oauth2.googleapis.com/*', 'https://www.googleapis.com/*']),
+        'host permissions must be exactly the two googleapis hosts');
+    }
+  });
+
+  test('extension: a manifest declaring default_locale must ship its _locales subtree', () => {
+    // Chrome refuses to load an extension whose manifest declares
+    // default_locale without _locales/<locale>/messages.json
+    // (v2.32.120 shipped exactly that and failed to load).
+    // Nothing in the extension calls chrome.i18n.getMessage — the
+    // popup carries its own STRINGS table — so the src manifest must
+    // not declare default_locale at all.
+    const srcManifest = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'manifest.json'), 'utf8');
+    assert(!srcManifest.includes('default_locale'),
+      'src manifest must not declare default_locale (no code uses chrome.i18n.getMessage)');
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      const jsFiles = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));
+      for (const f of jsFiles) {
+        const src = fs.readFileSync(path.join(dir, f), 'utf8');
+        assert(!src.includes('chrome.i18n.getMessage'),
+          `${f} must not call chrome.i18n.getMessage (it needs a _locales subtree)`);
+      }
+      const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+      if (m.default_locale) {
+        const messagesPath = path.join(dir, '_locales', m.default_locale, 'messages.json');
+        assert(fs.existsSync(messagesPath),
+          `manifest declares default_locale ${m.default_locale} but ${messagesPath} is missing — Chrome will refuse to load the extension`);
+        JSON.parse(fs.readFileSync(messagesPath, 'utf8'));
+      }
+    }
+  });
+
+  test('extension: pinned keys derive the registered IDs, and the variants differ', () => {
+    const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
+    const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));
+    assert(deriveExtensionId(prod.key) === 'cnpaghkipnignlonpoblbpoceheompap',
+      'prod key must derive the registered prod extension ID (else the OAuth redirect URI breaks)');
+    assert(deriveExtensionId(dev.key) === 'kpogipeoagoggadlphkmehgfgippgjfl',
+      'dev key must derive the registered dev extension ID');
+    assert(prod.key !== dev.key, 'the two variants must have different pinned keys');
+  });
+
+  test('extension: stamped variants resolve to different folders and app URLs', async () => {
+    const prod = await import(pathToFileURL(path.join(EXT_PROD, 'variant.js')).href);
+    const dev = await import(pathToFileURL(path.join(EXT_DEV, 'variant.js')).href);
+    assert(prod.VARIANT.folder === 'DeLaClaw', 'prod must resolve the DeLaClaw/ folder');
+    assert(dev.VARIANT.folder === 'DeLaClawDev', 'dev must resolve the DeLaClawDev/ folder');
+    assert(prod.VARIANT.appUrl === 'https://delaclaw.com', 'prod must open delaclaw.com');
+    assert(dev.VARIANT.appUrl === 'https://dev.delaclaw.pages.dev', 'dev must open the dev preview');
+    assert(prod.VARIANT.extensionId === 'cnpaghkipnignlonpoblbpoceheompap', 'prod variant id must match the registered id');
+    assert(dev.VARIANT.extensionId === 'kpogipeoagoggadlphkmehgfgippgjfl', 'dev variant id must match the registered id');
+    assert(prod.VARIANT.isDev === false && dev.VARIANT.isDev === true, 'isDev must differ per variant');
+  });
+
+  test('extension: shortcuts are the spec chords, per variant', () => {
+    const prod = JSON.parse(fs.readFileSync(path.join(EXT_PROD, 'manifest.json'), 'utf8'));
+    const dev = JSON.parse(fs.readFileSync(path.join(EXT_DEV, 'manifest.json'), 'utf8'));
+    const pKey = prod.commands._execute_action.suggested_key;
+    const dKey = dev.commands._execute_action.suggested_key;
+    assert(pKey.default === 'Ctrl+Shift+Y' && pKey.mac === 'Command+Shift+Y', 'prod shortcut must be Ctrl+Shift+Y');
+    assert(dKey.default === 'Ctrl+Shift+U' && dKey.mac === 'Command+Shift+U', 'dev shortcut must be Ctrl+Shift+U');
+  });
+
+  test('extension: known schema version is the latest DRIVE_MIGRATIONS key', async () => {
+    const { compareVersions } = await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'version-compare.js')).href);
+    const src = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf8');
+    const keys = [...src.matchAll(/'([0-9][0-9.]*?)':/g)].map((m) => m[1]);
+    const latest = keys.sort(compareVersions).pop();
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      const { VARIANT } = await import(pathToFileURL(path.join(dir, 'variant.js')).href);
+      assert(VARIANT.knownSchemaVersion === latest,
+        `stamped knownSchemaVersion (${VARIANT.knownSchemaVersion}) must equal the latest migration key (${latest})`);
+    }
+  });
+
+  test('extension: popup and service worker entry points exist and are wired', () => {
+    const html = fs.readFileSync(path.join(EXT_PROD, 'popup.html'), 'utf8');
+    assert(html.includes('<script type="module" src="popup.js">'), 'popup.html must load popup.js as a module');
+    assert(html.includes('href="popup.css"'), 'popup.html must load popup.css');
+    const sw = fs.readFileSync(path.join(EXT_PROD, 'service-worker.js'), 'utf8');
+    assert(sw.includes('chrome.runtime.onMessage.addListener'), 'service worker must expose the message API');
+    const popupJs = fs.readFileSync(path.join(EXT_PROD, 'popup.js'), 'utf8');
+    assert(popupJs.includes("chrome.runtime.sendMessage"), 'popup must talk to the service worker, never to Drive directly');
+    assert(!popupJs.includes('launchWebAuthFlow'), 'popup must never run launchWebAuthFlow (its document dies mid-flow)');
+    assert(!popupJs.includes('innerHTML'), 'popup must not use innerHTML (user data goes through textContent)');
+  });
+
+  test('extension: popup CSS carries the theme variables copied from style.css', () => {
+    const css = fs.readFileSync(path.join(EXT_PROD, 'popup.css'), 'utf8');
+    assert(css.includes(':root {'), 'popup.css must include the :root variables copied from style.css');
+    assert(css.includes('[data-theme="light"]'), 'popup.css must include the light-theme overrides copied from style.css');
+    assert(!css.includes('__THEME_VARS__'), 'the __THEME_VARS__ placeholder must be replaced at packaging');
+    for (const v of ['--bg', '--text', '--muted', '--accent', '--surface', '--border']) {
+      assert(css.includes(v), `popup.css must define ${v}`);
+    }
+  });
+
+  test('extension: icons exist at all sizes and the variants differ', () => {
+    for (const dir of [EXT_PROD, EXT_DEV]) {
+      for (const s of [16, 32, 48, 128]) {
+        const p = path.join(dir, 'icons', `icon-${s}.png`);
+        assert(fs.existsSync(p) && fs.statSync(p).size > 0, `missing icon ${p}`);
+      }
+    }
+    const prod128 = fs.readFileSync(path.join(EXT_PROD, 'icons', 'icon-128.png'));
+    const dev128 = fs.readFileSync(path.join(EXT_DEV, 'icons', 'icon-128.png'));
+    assert(!prod128.equals(dev128), 'prod and dev icons must differ (the two installed extensions must be distinguishable)');
+  });
+
+  test('extension data: TODO row shape matches the app insert path', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const row = data.buildTodoRow({ text: 'Buy milk', categoryId: 'c1', sortOrder: -2 });
+    assert(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(row.id),
+      'todo id must be a UUID');
+    assert(row.done === false, 'a new TODO row sets done: false explicitly');
+    assert(row.priority === 'normal', 'priority defaults to normal');
+    assert(!('due_date' in row), 'due_date is omitted when unset');
+    assert(!('snooze_until' in row), 'snooze_until is omitted on insert (the app reads a missing key as not snoozed)');
+    assert(row.created_at === row.updated_at && !Number.isNaN(Date.parse(row.created_at)),
+      'created_at/updated_at are ISO timestamps set to now');
+    const dated = data.buildTodoRow({ text: 'x', categoryId: 'c1', sortOrder: 0, dueDate: '2026-11-20' });
+    assert(dated.due_date === '2026-11-20', 'due_date is set when given');
+  });
+
+  test('extension data: sort_order uses the pending-only minimum, not all rows', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const rows = [
+      { done: true, category_id: 'c1', sort_order: -50 },
+      { done: false, category_id: 'c1', sort_order: -3 },
+      { done: false, category_id: 'c2', sort_order: -99 },
+    ];
+    assert(data.computeMinSortOrder(rows, 'c1') === -4,
+      'done rows must not drag new items down (min over pending only, minus 1)');
+    assert(data.computeMinSortOrder([], 'c1') === 0, 'an empty category starts at 0');
+    assert(data.computeMinSortOrder(rows.filter((r) => r.done), 'c1') === 0,
+      'a category with only done rows starts at 0');
+  });
+
+  test('extension data: category resolution never hardcodes an id', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const cats = [
+      { id: '_default_todo_categories', name: '', is_protected: 1 },
+      { id: '_shared_todo_cat', name: '__shared__', is_protected: 1 },
+      { id: 'admin', name: 'Admin', is_protected: 0 },
+    ];
+    assert(data.resolveDefaultCategory(cats).id === '_default_todo_categories',
+      'the General row is the protected non-shared row, resolved at runtime');
+    const offered = data.userCategories(cats);
+    assert(offered.length === 1 && offered[0].id === 'admin',
+      'the picker offers real user categories only (no __shared__, no General)');
+  });
+
+  test('extension data: capture text escapes links and truncates selections', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const text = data.buildCaptureText('A [B] title', 'https://x.example/a)b');
+    assert(text === 'A \\[B\\] title\n[A \\[B\\] title](https://x.example/a%29b)',
+      'capture text escapes [ ] in titles and ) in URLs');
+    assert(data.truncateSelection('x'.repeat(600)).length === 500, 'selections truncate to 500 characters');
+    assert(data.truncateSelection('short') === 'short', 'short selections pass through');
+  });
+
+  test('extension data: next_due recompute matches the app algorithm, incl. early guard and end date', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    // Daily, completed on time: next day.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_days:1', next_due: '2026-11-15', end_date: null, is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: '2026-11-16', is_finished: 0 }),
+      'daily completion advances next_due by one day');
+    // Weekly Mon/Wed/Fri, completed early (Sun 15 Nov, stored due Mon 16):
+    // unguarded next is Mon 16, which is <= current, so the guard skips it → Wed 18.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', next_due: '2026-11-16', end_date: null, is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: '2026-11-18', is_finished: 0 }),
+      'completing early skips the imminent occurrence (early guard)');
+    // End date: recomputed due strictly past it finishes the habit.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_days:1', next_due: '2026-11-15', end_date: '2026-11-15', is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: null, is_finished: 1 }),
+      'a due date past the end date finishes the habit');
+    // An occurrence exactly ON the end date is still due.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every_N_days:1', next_due: '2026-11-15', end_date: '2026-11-16', is_finished: 0 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: '2026-11-16', is_finished: 0 }),
+      'an occurrence exactly on the end date is still due');
+    // Free-text rules: next_due null, finished state kept.
+    assert(JSON.stringify(data.recomputeNextDueForDone(
+      { frequency_rule: 'every morning', next_due: '2026-11-15', end_date: null, is_finished: 1 },
+      '2026-11-15T10:00:00.000Z')) === JSON.stringify({ next_due: null, is_finished: 1 }),
+      'free-text rules keep their previous finished state');
+  });
+
+  test('extension data: next_due recompute agrees with the app migration helper except for the early guard', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const freq = await import(pathToFileURL(path.join(JS_DIR, 'frequency-rule.js')).href);
+    // A completion that is NOT early: both must agree.
+    const habit = { frequency_rule: 'every_N_days:1', next_due: '2026-11-10', end_date: null, is_finished: 0 };
+    const done = data.recomputeNextDueForDone(habit, '2026-11-15T10:00:00.000Z');
+    const migrated = freq.recomputeNextDueForMigration(habit, '2026-11-15T10:00:00.000Z');
+    assert(done.next_due === migrated.next_due && done.is_finished === migrated.is_finished,
+      'on a non-early completion the extension recompute must agree with the app migration helper');
+    // An early completion: the migration helper resurrects the skipped
+    // occurrence (by design, one-shot repair); the Done path must not.
+    const earlyHabit = { frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', next_due: '2026-11-16', end_date: null, is_finished: 0 };
+    const earlyDone = data.recomputeNextDueForDone(earlyHabit, '2026-11-15T10:00:00.000Z');
+    const earlyMigrated = freq.recomputeNextDueForMigration(earlyHabit, '2026-11-15T10:00:00.000Z');
+    assert(earlyDone.next_due === '2026-11-18' && earlyMigrated.next_due === '2026-11-16',
+      'on an early completion the Done path skips the imminent occurrence while the migration helper does not');
+  });
+
+  test('extension data: due list applies every exclusion', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const today = data.todayLocalStr();
+    const noon = new Date(); noon.setHours(12, 0, 0, 0);
+    const yesterdayNoon = new Date(noon); yesterdayNoon.setDate(yesterdayNoon.getDate() - 1);
+    const habits = [
+      { id: 'due', name: 'Due', next_due: today, is_draft: 0, is_finished: 0 },
+      { id: 'overdue', name: 'Overdue', next_due: '2000-01-01', is_draft: 0, is_finished: 0 },
+      { id: 'future', name: 'Future', next_due: '2999-01-01', is_draft: 0, is_finished: 0 },
+      { id: 'draft', name: 'Draft', next_due: today, is_draft: 1, is_finished: 0 },
+      { id: 'finished', name: 'Finished', next_due: today, is_draft: 0, is_finished: 1 },
+      { id: 'shared', name: 'Shared', next_due: today, is_draft: 0, is_finished: 0, shared_id: 's1' },
+      { id: 'snoozed', name: 'Snoozed', next_due: today, is_draft: 0, is_finished: 0, snoozed_until: '2999-01-01' },
+      { id: 'snooze-expired', name: 'Snooze expired', next_due: today, is_draft: 0, is_finished: 0, snoozed_until: '2000-01-01' },
+      { id: 'done-today', name: 'Done today', next_due: today, is_draft: 0, is_finished: 0 },
+      { id: 'done-yesterday', name: 'Done yesterday', next_due: today, is_draft: 0, is_finished: 0 },
+    ];
+    const completions = [
+      { habit_id: 'done-today', completed_at: noon.toISOString() },
+      { habit_id: 'done-yesterday', completed_at: yesterdayNoon.toISOString() },
+    ];
+    const shown = data.filterDueHabits(habits, completions, today).map((h) => h.id).sort();
+    assert(JSON.stringify(shown) === JSON.stringify(['done-yesterday', 'due', 'overdue', 'snooze-expired']),
+      `due list must show due/overdue/snooze-expired/done-yesterday only, got ${shown}`);
+  });
+
+  test('extension data: schema-version guard refuses newer or missing versions', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    assert(data.checkSchemaVersion('2.32.102', '2.32.102') === null, 'equal versions may write');
+    assert(data.checkSchemaVersion('2.32.34', '2.32.102') === null, 'an older live version may write');
+    assert(typeof data.checkSchemaVersion('2.32.103', '2.32.102') === 'string',
+      'a newer live version must refuse with a message');
+    assert(typeof data.checkSchemaVersion(null, '2.32.102') === 'string',
+      'a missing live version must refuse (setup incomplete)');
+  });
+
+  test('extension i18n: every popup string exists in EN, FR and ES', async () => {
+    const i18n = await import(pathToFileURL(path.join(EXT_PROD, 'i18n.js')).href);
+    const keys = Object.keys(i18n.STRINGS.en).sort();
+    assert(keys.length > 0, 'the popup must have strings');
+    for (const lang of ['fr', 'es']) {
+      assert(JSON.stringify(Object.keys(i18n.STRINGS[lang]).sort()) === JSON.stringify(keys),
+        `${lang} strings must cover exactly the en keys`);
+      for (const k of keys) assert(i18n.STRINGS[lang][k], `${lang} string ${k} must not be empty`);
+    }
+    assert(i18n.pickLang('fr-FR') === 'fr' && i18n.pickLang('de') === 'en', 'language pick falls back to en');
+    assert(i18n.makeT('fr')('signIn') === 'Se connecter avec Google', 'fr sign-in string');
+  });
+
+  test('extension auth: implicit-flow URL and fragment parsing', async () => {
+    const auth = await import(pathToFileURL(path.join(EXT_PROD, 'auth.js')).href);
+    const url = auth.buildAuthUrl({ redirectUri: 'https://cnpaghkipnignlonpoblbpoceheompap.chromiumapp.org/oauth2', state: 's1', interactive: true });
+    assert(url.includes('response_type=token'), 'implicit flow must request response_type=token');
+    assert(url.includes('prompt=consent'), 'interactive flow must use prompt=consent');
+    assert(!url.includes('code_challenge') && !url.includes('response_type=code'), 'no PKCE and no code flow');
+    assert(url.includes('drive.file') && url.includes('calendar.app.created'), 'both scopes must be in the grant');
+    const silent = auth.buildAuthUrl({ redirectUri: 'https://x.chromiumapp.org/oauth2', state: 's2', interactive: false });
+    assert(silent.includes('prompt=none'), 'silent re-auth must use prompt=none');
+    const parsed = auth.parseAuthRedirect('https://cnpaghkipnignlonpoblbpoceheompap.chromiumapp.org/oauth2#access_token=abc&token_type=Bearer&expires_in=3600&state=s1', 's1');
+    assert(parsed.accessToken === 'abc' && parsed.expiresInSec === 3600, 'fragment parsing must return the token and expiry');
+    assertThrows(() => auth.parseAuthRedirect('https://x/#access_token=abc&expires_in=3600&state=s2', 's1'),
+      'a state mismatch must be rejected');
+    assertThrows(() => auth.parseAuthRedirect('https://x/#error=access_denied&state=s1', 's1'),
+      'a Google error must be rejected');
+  });
+
+  test('extension drive: folder resolution refuses zero or two folders', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const stub = async (url) => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ files: [] }),
+    });
+    await assertRejects(drive.resolveFolderId('tok', 'DeLaClaw', stub), 'no folder must refuse');
+    const two = async (url) => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ files: [{ id: 'a', name: 'DeLaClaw' }, { id: 'b', name: 'DeLaClaw' }] }),
+    });
+    await assertRejects(drive.resolveFolderId('tok', 'DeLaClaw', two), 'two folders must refuse to guess');
+    const one = async (url) => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify({ files: [{ id: 'folder-1', name: 'DeLaClaw' }] }),
+    });
+    assert(await drive.resolveFolderId('tok', 'DeLaClaw', one) === 'folder-1', 'one folder resolves');
+  });
+
+  test('extension drive: upload uses the app multipart shape', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    let captured = null;
+    const stub = async (url, opts) => {
+      captured = { url, opts };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'f1' }) };
+    };
+    await drive.uploadFile('tok', 'f1', 'todos.json', [{ id: 'a', text: 'hello' }], stub);
+    assert(captured.opts.method === 'PATCH', 'upload must PATCH');
+    assert(captured.url.includes('uploadType=multipart'), 'upload must use uploadType=multipart');
+    assert(captured.opts.headers['Content-Type'].includes('multipart/related; boundary=---dlc-drive-boundary'),
+      'upload must use the app multipart boundary');
+    assert(captured.opts.body.includes('"name":"todos.json"'), 'upload body must carry the metadata part');
+    assert(captured.opts.body.includes('[\n  {\n    "id": "a",\n    "text": "hello"\n  }\n]'),
+      'upload body must serialize with JSON.stringify(data, null, 2)');
+  });
+
+  // A fake Drive backend for the write-protocol tests: files.list,
+  // media download, metadata reads and multipart upload, with a hook
+  // that applies an external change on a chosen metadata read.
+  function fakeDrive(initialRows) {
+    let rows = JSON.parse(JSON.stringify(initialRows));
+    let md5 = 'v1';
+    let metaCalls = 0;
+    let uploads = [];
+    let changeCount = 0;
+    let changeOnMetaCall = null; // fn(n) — applied before answering meta call n
+    let mediaCalls = 0;
+    let changeOnMediaCall = null; // fn(n) — applied before answering media download n
+    const fetchImpl = async (url, opts = {}) => {
+      if (url.includes('/files?q=')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ files: [{ id: 'todos-1', name: 'todos.json', md5Checksum: md5 }] }) };
+      }
+      if (url.includes('?alt=media')) {
+        mediaCalls += 1;
+        if (changeOnMediaCall) changeOnMediaCall(mediaCalls);
+        return { ok: true, status: 200, text: async () => JSON.stringify(rows) };
+      }
+      if (url.includes('fields=md5Checksum')) {
+        metaCalls += 1;
+        if (changeOnMetaCall) changeOnMetaCall(metaCalls);
+        return { ok: true, status: 200, text: async () => JSON.stringify({ md5Checksum: md5, modifiedTime: '2026-11-15T00:00:00.000Z' }) };
+      }
+      if ((opts.method || 'GET') === 'PATCH') {
+        const body = opts.body || '';
+        const parts = body.split(`--${'---dlc-drive-boundary'}`);
+        const dataPart = parts[2] || '';
+        const json = dataPart.slice(dataPart.indexOf('\r\n\r\n') + 4);
+        const uploaded = JSON.parse(json);
+        uploads.push(uploaded);
+        rows = uploaded;
+        md5 = `v${uploads.length + 1}`;
+        return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'todos-1' }) };
+      }
+      throw new Error(`unexpected fake-drive URL: ${url}`);
+    };
+    return {
+      fetchImpl,
+      get uploads() { return uploads; },
+      applyExternalChange(newRows) { rows = newRows; changeCount += 1; md5 = `v-ext-${changeCount}`; },
+      setChangeOnMetaCall(fn) { changeOnMetaCall = fn; },
+      setChangeOnMediaCall(fn) { changeOnMediaCall = fn; },
+      get rows() { return rows; },
+    };
+  }
+
+  test('extension data: appendRowOnce never duplicates a row id, and builders accept a fixed id', async () => {
+    const data = await import(pathToFileURL(path.join(EXT_PROD, 'data.js')).href);
+    const rows = [{ id: 'a', text: 'existing' }];
+    const appended = data.appendRowOnce(rows, { id: 'b', text: 'new' });
+    assert(appended.length === 2 && appended[1].id === 'b', 'a new id is appended');
+    assert(data.appendRowOnce(appended, { id: 'b', text: 'new again' }) === appended,
+      'an existing id returns the same rows untouched — a retried write is a no-op');
+    assert(JSON.stringify(data.appendRowOnce(null, { id: 'x' })) === JSON.stringify([{ id: 'x' }]),
+      'a missing rows array starts fresh');
+    assert(data.buildTodoRow({ text: 't', categoryId: 'c', sortOrder: 0, id: 'fixed' }).id === 'fixed',
+      'buildTodoRow accepts a fixed id');
+    assert(data.buildCompletionRow('h1', '2026-11-21T00:00:00.000Z', 'fixed').id === 'fixed',
+      'buildCompletionRow accepts a fixed id');
+    assert(data.buildTodoRow({ text: 't', categoryId: 'c', sortOrder: 0 }).id,
+      'without a fixed id a row still gets one');
+  });
+
+  test('extension service worker: quick-add and habit-done fix their row id before the auth retry', () => {
+    const swSrc = fs.readFileSync(path.join(EXT_PROD, 'service-worker.js'), 'utf-8');
+    for (const [fnName, idName] of [['handleQuickAdd', 'insertedId'], ['handleMarkHabitDone', 'completionId']]) {
+      const start = swSrc.indexOf(`async function ${fnName}`);
+      assert(start !== -1, `could not find ${fnName} in service-worker.js`);
+      const end = swSrc.indexOf('\n}\n', start);
+      assert(end !== -1, `could not find the end of ${fnName}`);
+      const fn = swSrc.slice(start, end);
+      // The id must be fixed before withAuthRetry wraps the operation —
+      // otherwise a 401 after a successful write re-runs the insert with
+      // a fresh id and duplicates the row (006c30f review).
+      assert(fn.indexOf(`const ${idName} = crypto.randomUUID();`) !== -1, `${fnName} must fix its row id up front`);
+      assert(fn.indexOf(`const ${idName} = crypto.randomUUID();`) < fn.indexOf('return withAuthRetry('),
+        `${fnName} must fix its row id before the auth retry, not inside it`);
+      assert(fn.includes('appendRowOnce(rows, row)'), `${fnName} must append through the idempotent helper`);
+      assert(!fn.includes('return [...rows, row];'), `${fnName} must not blindly append`);
+    }
+  });
+
+  test('extension drive: md5 pre-check re-reads once and keeps the concurrent change', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    // The file moves once, between the list read and the pre-check.
+    fake.setChangeOnMetaCall((n) => {
+      if (n === 1) fake.applyExternalChange([{ id: 'a', text: 'existing' }, { id: 'ext', text: 'from another client' }]);
+    });
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    let mine = null;
+    const readBack = await drive.writeTable('tok', file, (rows) => {
+      mine = { id: 'mine', text: 'mine' };
+      return [...rows, mine];
+    }, (rows) => rows.some((r) => r.id === 'mine'), fake.fetchImpl);
+    assert(fake.uploads.length === 1, 'one upload after one re-read');
+    const uploaded = fake.uploads[0];
+    assert(uploaded.some((r) => r.id === 'ext') && uploaded.some((r) => r.id === 'mine'),
+      'the upload must keep the concurrent change and the new row');
+    assert(readBack.some((r) => r.id === 'mine'), 'the confirming read-back must show the new row');
+  });
+
+  test('extension drive: the folder cache is keyed by account and drops on sign-out', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    let resolves = 0;
+    const fetchImpl = async (url) => {
+      if (url.includes('/files?q=')) {
+        resolves += 1;
+        return { ok: true, status: 200, text: async () => JSON.stringify({ files: [{ id: `folder-${resolves}`, name: 'DeLaClaw' }] }) };
+      }
+      throw new Error(`unexpected fake-drive URL: ${url}`);
+    };
+    const cache = drive.createFolderCache();
+    assert(await cache.folderId('tok', 'DeLaClaw', 'a@example.com', fetchImpl) === 'folder-1', 'first resolve');
+    assert(await cache.folderId('tok', 'DeLaClaw', 'a@example.com', fetchImpl) === 'folder-1', 'the same account reuses the cache');
+    assert(resolves === 1, 'the same account must not re-resolve');
+    assert(await cache.folderId('tok', 'DeLaClaw', 'b@example.com', fetchImpl) === 'folder-2', 'a different account re-resolves');
+    assert(resolves === 2, 'an account change must re-resolve, never reuse the previous account\'s folder');
+    cache.reset();
+    assert(await cache.folderId('tok', 'DeLaClaw', 'b@example.com', fetchImpl) === 'folder-3', 'reset forces a fresh resolve');
+    assert(resolves === 3, 'reset must re-resolve even for the same account');
+  });
+
+  test('extension service worker: folder resolution follows the account and sign-out drops the cache', () => {
+    const swSrc = fs.readFileSync(path.join(EXT_PROD, 'service-worker.js'), 'utf-8');
+    assert(swSrc.includes('createFolderCache'), 'the worker must use the account-keyed folder cache');
+    assert(swSrc.includes('folderCache.folderId(token, VARIANT.folder,'), 'folder resolution must pass the account email');
+    assert(!swSrc.includes('let cachedFolderId'), 'no bare folder-id cache may survive');
+    assert(swSrc.includes('folderCache.reset()'), 'sign-out must drop the cached folder id');
+  });
+
+  test('extension drive: concurrent writes to the same file are serialized and both survive', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    await Promise.all([
+      drive.writeTable('tok', file, (rows) => [...rows, { id: 'mine1', text: 'first' }], (rows) => rows.some((r) => r.id === 'mine1'), fake.fetchImpl),
+      drive.writeTable('tok', file, (rows) => [...rows, { id: 'mine2', text: 'second' }], (rows) => rows.some((r) => r.id === 'mine2'), fake.fetchImpl),
+    ]);
+    assert(fake.uploads.length === 2, 'two serialized writes mean two uploads');
+    assert(fake.rows.some((r) => r.id === 'mine1') && fake.rows.some((r) => r.id === 'mine2'),
+      'the second write must see the first write\'s row — no silent clobber');
+  });
+
+  test('extension drive: a read-back missing rows the write produced aborts loudly', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    // A concurrent writer overwrites the file between our upload and our
+    // read-back, dropping a pre-existing row but keeping our new one —
+    // the caller's verify alone would pass, so the baseline check must catch it.
+    fake.setChangeOnMediaCall((n) => {
+      if (n === 2) fake.applyExternalChange([{ id: 'mine', text: 'mine' }]);
+    });
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    await assertRejects(drive.writeTable('tok', file, (rows) => [...rows, { id: 'mine', text: 'mine' }],
+      (rows) => rows.some((r) => r.id === 'mine'), fake.fetchImpl),
+      'a read-back missing a row the write produced must fail loudly');
+    assert(fake.uploads.length === 1, 'the upload already happened — the failure is reported, not silently swallowed');
+  });
+
+  test('extension drive: file moved twice aborts and writes nothing', async () => {
+    const drive = await import(pathToFileURL(path.join(EXT_PROD, 'drive.js')).href);
+    const fake = fakeDrive([{ id: 'a', text: 'existing' }]);
+    // The file moves on every metadata read: the pre-check can never pass.
+    fake.setChangeOnMetaCall(() => fake.applyExternalChange([{ id: 'a', text: 'existing' }, { id: 'ext', text: 'moved' }]));
+    const file = { id: 'todos-1', name: 'todos.json', md5Checksum: 'v1' };
+    await assertRejects(drive.writeTable('tok', file, (rows) => [...rows, { id: 'mine' }],
+      (rows) => rows.some((r) => r.id === 'mine'), fake.fetchImpl),
+      'a file that moves twice must abort');
+    assert(fake.uploads.length === 0, 'an aborted write must upload nothing');
+  });
 
   // ===================================================================
   // SUMMARY

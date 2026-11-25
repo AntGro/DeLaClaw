@@ -312,6 +312,51 @@ async function driveRemovePermission(token, fileId, permissionId) {
     { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
 }
 
+// Pure: the permission ids to remove from a file so that the given emails
+// lose access. Only permissions carrying a listed email match — anyone
+// else's access (e.g. someone the owner shared with outside the group)
+// is left alone.
+function revocablePermissionIds(filePerms, emails) {
+  if (!Array.isArray(filePerms) || !emails || emails.size === 0) return [];
+  const ids = [];
+  for (const p of filePerms) {
+    if (p && p.id && p.emailAddress && emails.has(p.emailAddress)) ids.push(p.id);
+  }
+  return ids;
+}
+
+// Join-backfill (v2.32.131): the distinct Drive file ids of MY attachments
+// in a group's list-item payloads — the files the grant sweep must share.
+// Pure: items is the group's lists typeData, myId is my member id for the group.
+function ownAttachmentFileIds(items, myId) {
+  const ids = new Set();
+  if (!myId || !Array.isArray(items)) return [];
+  for (const item of items) {
+    const atts = item?.payload?.attachments;
+    if (!Array.isArray(atts)) continue;
+    for (const a of atts) {
+      if (a && a.drive_file_id && a.uploaded_by === myId) ids.add(a.drive_file_id);
+    }
+  }
+  return [...ids];
+}
+
+// Pure: the member_ids of every joined member except me, from a group
+// roster. The roster carries member_id (never id) — reading .id yields
+// undefined and the revoke/sweep then matches nobody (006c30f review).
+function otherJoinedMemberIds(members, myId) {
+  return (members || [])
+    .filter(m => m && m.status === 'joined' && m.member_id && m.member_id !== myId)
+    .map(m => m.member_id);
+}
+
+// Pure: the display name of a member id in a roster — display_name, else
+// invited_label, else '' (the sweep toast falls back to the count then).
+function memberDisplayNameFromRoster(members, id) {
+  const m = (members || []).find(m => m && m.member_id === id);
+  return m ? (m.display_name || m.invited_label || '') : '';
+}
+
 // ── Merge ───────────────────────────────────────────────────────
 // Item merging lives in sharing-file-reconcile.js (backend-agnostic):
 // unionItems for remote-vs-remote snapshots, reconcileItems for
@@ -1145,6 +1190,19 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       return { display_name: user.name || fallbackDisplayName(user.email), backendUserId: 'googledrive' };
     },
 
+    // The uploader id for attachment records: the member id is purely a
+    // hash of the email, so it is the same in every group — and it is the
+    // only identity available for a personal item, which belongs to no
+    // group. Null when the account email cannot be read. (Kept separate
+    // from getCurrentMemberId, which must return the group row's id —
+    // the group is the authority for completion authorship.)
+    async getCurrentUserMemberId() {
+      try {
+        const user = await ensureUser();
+        return user?.email ? await memberIdFromEmail(user.email) : null;
+      } catch { return null; }
+    },
+
     async getCurrentMemberId(groupId) {
       return currentMemberId(groupId);
     },
@@ -1367,6 +1425,16 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
           await repairSelfLeave(row.id);
         } catch (err) {
           console.warn(`sharing: self-leave repair failed for ${row.id} (retried on next load):`, err);
+        }
+      }
+
+      // Join-backfill (v2.32.131): grant my own attachment files to members
+      // who joined while I was away. Best-effort, never fails the load.
+      for (const gid of _groups.keys()) {
+        try {
+          await this.sweepAttachmentGrants(gid);
+        } catch (err) {
+          console.warn(`sharing: attachment grant sweep failed for ${gid} (retried on next load):`, err);
         }
       }
 
@@ -1615,6 +1683,133 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
 
       emit('member-invited', { groupId, member_id });
       return { member_id };
+    },
+
+    /**
+     * Share a Drive file (e.g. a list item attachment, which lives in the
+     * uploader's own Drive) with every other joined member of the group,
+     * as reader. Member emails are permission material: they are read at
+     * runtime from the group folder's permission list and matched to the
+     * roster via memberIdFromEmail — never stored, never returned.
+     * Members who already have access are skipped. Returns the member_ids
+     * the file was shared with; a group with no other joined members is
+     * a no-op returning []. Any member may call it (the file is theirs);
+     * only the creator path (invite/remove) is creator-gated.
+     */
+    async shareFileWithGroup(groupId, fileId, role = 'reader') {
+      const e = _groups.get(groupId);
+      if (!e) throw new Error(`Group ${groupId} not loaded`);
+      const tok = await token();
+      const myId = await currentMemberId(groupId).catch(() => null);
+      const others = new Set((e.group.members || [])
+        .filter(m => m.status === 'joined' && m.member_id !== myId)
+        .map(m => m.member_id));
+      if (others.size === 0) return [];
+      // Skip members who already have access to this file — re-granting
+      // is an error on some Drive responses. One list call, not one per member.
+      const already = new Set();
+      try {
+        for (const p of await driveListPermissions(tok, fileId)) {
+          if (p.type === 'user' && p.emailAddress) {
+            const id = await memberIdFromEmail(p.emailAddress).catch(() => null);
+            if (id) already.add(id);
+          }
+        }
+      } catch { /* treat as none already shared */ }
+      const folderPerms = await driveListPermissions(tok, e.folderId);
+      const shared = [];
+      for (const p of folderPerms || []) {
+        if (p.type !== 'user' || !p.emailAddress) continue;
+        const id = await memberIdFromEmail(p.emailAddress).catch(() => null);
+        if (!id || !others.has(id) || already.has(id)) continue;
+        await driveShareWithUser(tok, fileId, p.emailAddress, role);
+        shared.push(id);
+      }
+      return shared;
+    },
+
+    /**
+     * Revoke on unshare (v2.32.135): remove every other joined member's
+     * reader access to one of MY files. Only the file owner can revoke,
+     * so this only ever touches files I uploaded; another member's files
+     * are never attempted. Best-effort per permission — a failed revoke
+     * leaves that grant in place (the pre-existing behaviour) and is
+     * logged, never thrown.
+     */
+    async revokeFileWithGroup(groupId, fileId, member_ids) {
+      const e = _groups.get(groupId);
+      if (!e || !fileId) return [];
+      const tok = await token();
+      if (!tok) return [];
+      const myId = await currentMemberId(groupId).catch(() => null);
+      if (!myId) return [];
+      // With member_ids, only those members lose access — the rollback of
+      // a partial share (v2.32.142) must not touch grants that predate the
+      // share. Without it, every other joined member loses access (unshare).
+      let others = new Set(otherJoinedMemberIds(e.group.members, myId));
+      if (Array.isArray(member_ids)) {
+        const wanted = new Set(member_ids);
+        others = new Set([...others].filter(id => wanted.has(id)));
+      }
+      if (others.size === 0) return [];
+      // The group members' emails, from the group folder's permission list.
+      const folderPerms = await driveListPermissions(tok, e.folderId);
+      const idByEmail = new Map();
+      for (const p of folderPerms || []) {
+        if (p.type !== 'user' || !p.emailAddress) continue;
+        const id = await memberIdFromEmail(p.emailAddress).catch(() => null);
+        if (id && others.has(id)) idByEmail.set(p.emailAddress, id);
+      }
+      if (idByEmail.size === 0) return [];
+      const filePerms = await driveListPermissions(tok, fileId);
+      const emailByPerm = new Map((filePerms || []).filter(p => p && p.id).map(p => [p.id, p.emailAddress]));
+      const revoked = [];
+      for (const permId of revocablePermissionIds(filePerms, new Set(idByEmail.keys()))) {
+        try {
+          await driveRemovePermission(tok, fileId, permId);
+          const member_id = idByEmail.get(emailByPerm.get(permId));
+          if (member_id) revoked.push(member_id);
+        } catch (err) {
+          console.warn(`sharing: revoke failed for ${fileId} permission ${permId}:`, err);
+        }
+      }
+      return [...new Set(revoked)];
+    },
+
+    /**
+     * Join-backfill (v2.32.131): grant every currently-joined member reader
+     * access to my own attachment files in this group. Called on group load
+     * (covers members who joined while I was away) and when the poll spots
+     * a fresh join. Idempotent — shareFileWithGroup skips members who already
+     * have access — so re-running is a no-op for them. Best-effort: a file
+     * whose grants fail is logged and left for the next load or join; the
+     * member can still use Drive's request-access link.
+     */
+    async sweepAttachmentGrants(groupId) {
+      const e = _groups.get(groupId);
+      if (!e) return [];
+      const myId = await currentMemberId(groupId).catch(() => null);
+      if (!myId) return [];
+      const granted = [];
+      for (const fileId of ownAttachmentFileIds(e.typeData['lists'] || [], myId)) {
+        try {
+          granted.push(...await this.shareFileWithGroup(groupId, fileId, 'reader'));
+        } catch (err) {
+          console.warn(`sharing: attachment grant sweep failed for ${fileId}:`, err);
+        }
+      }
+      const memberIds = [...new Set(granted)];
+      if (memberIds.length) {
+        // The file owner should know the new member can now open their
+        // files — surface it as a toast, not just a console line. Names
+        // come from the group row; an unresolvable name falls back to the
+        // listener showing the count instead.
+        const members = memberIds.map(id => {
+          return { id, name: memberDisplayNameFromRoster(e.group.members, id) };
+        });
+        emit('attachment-grants-swept', { groupId, group: e.group, members });
+      }
+      return memberIds;
     },
 
     /** Remove a member from a group. Creator-only. Reassigns the removed
@@ -2185,6 +2380,10 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
                     changed = true;
                     emit('group-changed', { groupId, group: e.group });
                     for (const m of freshJoins) emit('member-joined', { groupId, group: e.group, member: m });
+                    // Join-backfill: the fresh joiners can now open my files
+                    // attached before they joined. Fire-and-forget — the poll
+                    // must not wait on Drive grants.
+                    if (freshJoins.length) this.sweepAttachmentGrants(groupId).catch(err => console.warn(`sharing: attachment grant sweep failed for ${groupId}:`, err));
                   }
                 }
               } catch (err) {

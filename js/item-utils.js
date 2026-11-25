@@ -88,6 +88,204 @@ export function resetDragVisuals() {
 }
 
 
+// ── Pure touch row-action helpers ──
+// On touch-first devices each item row shows at most two primary actions
+// plus a kebab menu holding the rest. The preference lists below name, in
+// order, the actions that may stay visible; the first two present win and
+// everything else goes behind the menu. Keys are a button's data-action
+// value, or 'tr-expand-toggle' for the text expand button (which carries
+// no data-action). Welcome rows use welcome-* variants of the same
+// actions, so both spellings are listed. Returns indices, so the caller
+// applies the split positionally even when two buttons share a key.
+const TOUCH_PRIMARY_ACTIONS = {
+  todo: ['toggle-todo', 'welcome-toggle-todo', 'edit-todo-inline'],
+  habit: ['mark-habit-done', 'welcome-mark-habit-done', 'open-edit-habit-modal', 'edit-habit-inline'],
+  list: ['attach-to-list-item', 'edit-list-item-inline'],
+  task: ['update-task-status', 'prompt-edit-task'],
+  card: ['open-edit-flashcard', 'delete-flashcard'],
+  text: ['start-text-practice-for-text', 'start-text-practice-all-chunks'],
+  draft: ['request-proposal', 'start-inline-edit-draft', 'delete-draft'],
+};
+function splitRowActions(keys, primarySelectors) {
+  const primary = [];
+  const overflow = [];
+  const used = new Set();
+  (keys || []).forEach((key, i) => {
+    if (primary.length < 2 && key && (primarySelectors || []).includes(key) && !used.has(key)) {
+      primary.push(i);
+      used.add(key);
+    } else {
+      overflow.push(i);
+    }
+  });
+  return { primary, overflow };
+}
+// ── End pure touch row-action helpers ──
+
+// Touch row-action compaction: on touch-first devices each row shows its
+// two primary actions plus a kebab menu with the rest (see
+// TOUCH_PRIMARY_ACTIONS). Runs inside initItemHoverDelay's touch branch,
+// so every surface using it is covered (TODOs, Habits, Lists, Projects,
+// Memory cards/texts/drafts, and the Welcome focus rows, which use the
+// welcome-* action variants). Unknown rows (calendar) are left alone.
+function touchPrimaryConfigFor(item) {
+  const d = (item && item.dataset) || {};
+  if (d.cardId) return TOUCH_PRIMARY_ACTIONS.card;
+  if (d.draftId) return TOUCH_PRIMARY_ACTIONS.draft;
+  if (d.textId) return TOUCH_PRIMARY_ACTIONS.text;
+  if (d.todoId) return TOUCH_PRIMARY_ACTIONS.todo;
+  if (d.habitId) return TOUCH_PRIMARY_ACTIONS.habit;
+  if (d.itemId) return TOUCH_PRIMARY_ACTIONS.list;
+  if (d.taskId) return TOUCH_PRIMARY_ACTIONS.task;
+  return null;
+}
+
+function rowActionKey(btn) {
+  if (btn.dataset && btn.dataset.action) return btn.dataset.action;
+  if (btn.classList && btn.classList.contains('tr-expand-toggle')) return 'tr-expand-toggle';
+  return null;
+}
+
+function compactRowActionsForTouch(item, actions) {
+  if (!actions || actions.querySelector('.row-action-kebab')) return;
+  const config = touchPrimaryConfigFor(item);
+  if (!config) return;
+  const buttons = [...actions.querySelectorAll(':scope > button')];
+  if (buttons.length <= 2) return;
+  const { primary, overflow } = splitRowActions(buttons.map(rowActionKey), config);
+  if (!primary.length || !overflow.length) return;
+  const overflowSet = new Set(overflow);
+  buttons.forEach((btn, i) => {
+    if (overflowSet.has(i)) btn.classList.add('row-action-overflow');
+  });
+  const kebab = document.createElement('button');
+  kebab.type = 'button';
+  kebab.className = 'row-action-kebab';
+  kebab.title = t('common.more_actions');
+  kebab.setAttribute('aria-label', t('common.more_actions'));
+  kebab.setAttribute('aria-haspopup', 'menu');
+  kebab.setAttribute('aria-expanded', 'false');
+  kebab.setAttribute('aria-controls', 'rowActionsMenu');
+  kebab.innerHTML = lucideIcon('more-vertical', 16);
+  kebab.addEventListener('click', () => openRowActionsMenu(kebab, actions));
+  actions.appendChild(kebab);
+}
+
+// Single shared kebab menu (same popover pattern as the chunk panel in
+// flashcards.js: fixed, positioned by the trigger, flipped above when
+// space below is short, clamped to the viewport). Menu rows are clones of
+// the row's own overflow buttons, so tapping one fires the same
+// data-action via delegation; the clones keep only styling-free classes
+// (the done/history size rules would leak into the menu rows).
+let _rowActionsMenu = null;
+let _rowActionsMenuCleanup = null;
+
+function getRowActionsMenu() {
+  if (!_rowActionsMenu) {
+    _rowActionsMenu = document.createElement('div');
+    _rowActionsMenu.id = 'rowActionsMenu';
+    _rowActionsMenu.className = 'row-actions-menu';
+    _rowActionsMenu.setAttribute('role', 'menu');
+    // A menu choice fires its original action via delegation, then closes.
+    _rowActionsMenu.addEventListener('click', () => closeRowActionsMenu(true));
+    document.body.appendChild(_rowActionsMenu);
+  }
+  return _rowActionsMenu;
+}
+
+// restoreFocus: true when the menu was dismissed by keyboard (Escape/Tab)
+// or by choosing an item — focus goes back to the kebab that opened it.
+// Outside clicks and scrolls leave focus where the user put it.
+function closeRowActionsMenu(restoreFocus = false) {
+  if (_rowActionsMenu) {
+    _rowActionsMenu.classList.remove('open');
+    if (_rowActionsMenu._forKebab) {
+      _rowActionsMenu._forKebab.setAttribute('aria-expanded', 'false');
+      if (restoreFocus) _rowActionsMenu._forKebab.focus();
+    }
+  }
+  if (_rowActionsMenuCleanup) {
+    _rowActionsMenuCleanup();
+    _rowActionsMenuCleanup = null;
+  }
+}
+
+function openRowActionsMenu(kebab, actions) {
+  const menu = getRowActionsMenu();
+  const overflowBtns = [...actions.querySelectorAll(':scope > button.row-action-overflow')];
+  if (!overflowBtns.length) return;
+  // Tapping the kebab again closes the menu.
+  if (menu.classList.contains('open') && menu._forActions === actions) {
+    closeRowActionsMenu();
+    return;
+  }
+  closeRowActionsMenu();
+  menu._forActions = actions;
+  menu._forKebab = kebab;
+  menu.innerHTML = '';
+  for (const [i, btn] of overflowBtns.entries()) {
+    const clone = btn.cloneNode(true);
+    clone.classList.remove('row-action-overflow', 'todo-done-btn', 'habit-done-btn', 'habit-history-btn');
+    clone.classList.add('header-menu-item');
+    clone.setAttribute('role', 'menuitem');
+    // Roving tabindex: only the first item is tabbable; arrows move focus.
+    clone.tabIndex = i === 0 ? 0 : -1;
+    const label = document.createElement('span');
+    label.textContent = btn.title || btn.getAttribute('aria-label') || '';
+    clone.appendChild(label);
+    menu.appendChild(clone);
+  }
+  menu.classList.add('open');
+  kebab.setAttribute('aria-expanded', 'true');
+  const rect = kebab.getBoundingClientRect();
+  const mw = menu.offsetWidth;
+  const mh = menu.offsetHeight;
+  let left = Math.min(rect.left, window.innerWidth - mw - 8);
+  left = Math.max(8, left);
+  let top = rect.bottom + 4;
+  if (top + mh > window.innerHeight - 8) top = Math.max(8, rect.top - mh - 4);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  const onDocClick = (e) => {
+    // The kebab click that opened the menu is still bubbling when this
+    // listener is added; ignore clicks on the kebab itself.
+    if (kebab.contains(e.target)) return;
+    if (!menu.contains(e.target)) closeRowActionsMenu();
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { closeRowActionsMenu(true); return; }
+    // Tab closes the menu and hands focus back to the kebab first, so the
+    // browser's default Tab step continues from the kebab (the menu sits
+    // at the end of <body>, tabbing from inside it would jump away).
+    if (e.key === 'Tab') { closeRowActionsMenu(true); return; }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
+    const items = [...menu.querySelectorAll('[role="menuitem"]')];
+    if (!items.length) return;
+    const idx = items.indexOf(document.activeElement);
+    let next = idx;
+    if (e.key === 'ArrowDown') next = idx < 0 ? 0 : (idx + 1) % items.length;
+    else if (e.key === 'ArrowUp') next = idx < 0 ? items.length - 1 : (idx - 1 + items.length) % items.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = items.length - 1;
+    e.preventDefault();
+    items.forEach((it, i) => { it.tabIndex = i === next ? 0 : -1; });
+    items[next].focus();
+  };
+  const onScroll = () => closeRowActionsMenu();
+  document.addEventListener('click', onDocClick);
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('scroll', onScroll, true);
+  _rowActionsMenuCleanup = () => {
+    document.removeEventListener('click', onDocClick);
+    document.removeEventListener('keydown', onKey);
+    window.removeEventListener('scroll', onScroll, true);
+  };
+  // Opening the menu moves focus to its first item, for keyboard and
+  // pointer users alike (a button takes focus without opening a keyboard).
+  menu.querySelector('[role="menuitem"]')?.focus();
+}
+
+
 // ===================================================================
 // HOVER DELAY — show action buttons on hover / single-click
 // ===================================================================
@@ -171,6 +369,7 @@ export function initItemHoverDelay(container, {
       // Touch: single tap → toggle action buttons
       // Exclude taps on show-more/show-less buttons and action buttons themselves
       if (actions) {
+        compactRowActionsForTouch(item, actions);
         item.addEventListener('click', (e) => {
           // Skip if tapping on action buttons, show-more/less, or while editing/dragging
           if (e.target.closest(actionsSelector)) return;

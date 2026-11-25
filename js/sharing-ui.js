@@ -582,6 +582,13 @@ async function _convertGroupItemsToPersonal(groupId) {
       if (sh) {
         enriched.text = sh.payload?.text || sh.payload?.title || row.text || '';
         if (sh.payload?.note != null) enriched.note = sh.payload.note;
+        // Keep the original attachments, still pointing at the shared files
+        // (v2.32.136) — the grants survive leaving, so the links keep
+        // opening. The records keep their original uploaded_by, so a later
+        // delete of the kept copy never trashes another member's file.
+        if (Array.isArray(sh.payload?.attachments) && sh.payload.attachments.length) {
+          enriched.attachments = JSON.stringify(sh.payload.attachments);
+        }
       }
       await dbThrow(
         state.db.from('list_items').update({ ...nullShared, ...enriched }).eq('id', row.id),

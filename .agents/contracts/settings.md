@@ -46,10 +46,9 @@ Cross-cutting app configuration — theme, language, backend picker, sharing man
 - Item FKs use CASCADE on delete — deleting a user category deletes its items
 - App-level sharing cleanup runs before CASCADE to propagate shared-item deletion to all group members
 - Shortnames live directly on category/deck/project/list table rows as a `shortname` column (not in settings table)
-- Colors: solid header `var(--cat-color)` + 6% tinted body via `color-mix(in srgb, var(--cat-color) 6%, var(--bg))`
 
 ### Backend Picker
-- Drive | Local | Demo — segmented pill, mode-aware labels/hints/placeholders
+- Drive | Local | Demo — mode-aware labels/hints/placeholders
 - `#login` hash timing fixed to avoid race
 - `STAY_CONNECTED_KEY` persists connection credentials in localStorage
 

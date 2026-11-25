@@ -7,7 +7,7 @@ A personal life OS that runs in the browser. Your data lives in your Google Driv
 [![Live Demo](https://img.shields.io/badge/demo-delaclaw.com-454dc6)](https://delaclaw.com)
 
 <p align="center">
-  <img src="screenshots/welcome.png" alt="DeLaClaw Today dashboard" width="720">
+  <img src="screenshots/welcome.gif" alt="DeLaClaw Today dashboard" width="720">
 </p>
 
 ## What it does
@@ -24,7 +24,7 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 | **Habits** | Recurring habits with flexible scheduling (structured rules + free text), completion tracking, streaks |
 | **Memory** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
 | **Calendar** | Month, week, day and year views bringing together TODOs, habits, birthdays and your own events, with per-type filters |
-| **Lists** | General-purpose checklists with archival support |
+| **Lists** | General-purpose checklists with file attachments (Google Drive) |
 | **Group** | [COMING] Sharing-group management: members, invites, shared-item counts |
 
 ### Capabilities
@@ -41,11 +41,11 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/calendar.png" alt="Calendar month view" width="720">
+  <img src="screenshots/tabs.gif" alt="Switching between tabs" width="720">
 </p>
 
 <p align="center">
-  <img src="screenshots/todos.png" alt="TODOs" width="720">
+  <img src="screenshots/text-revision.gif" alt="Text revision mode" width="720">
 </p>
 
 ## Quick start
@@ -144,7 +144,7 @@ Tests covering unit logic, adapter compliance, import/export, and structural che
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — see [NOTICE](NOTICE) for attribution requirements.
+[PolyForm Noncommercial 1.0.0](LICENSE) — see [NOTICE](NOTICE) for the attribution request.
 
 DeLaClaw is source-available, not open source. You can use, modify, and distribute it for noncommercial purposes under the terms of the PolyForm Noncommercial License 1.0.0. Commercial use requires a separate license from the copyright holder. Versions released before October 2026 were distributed under AGPL-3.0 and remain available under those terms.
 

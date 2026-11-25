@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeLaClaw</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<div id="app">
+  <header class="popup-header">
+    <h1 id="appName"></h1>
+    <span id="variantTag" class="variant-tag" hidden></span>
+  </header>
+
+  <p id="accountLine" class="account-line"></p>
+
+  <div id="confirmBox" class="notice" hidden>
+    <p id="confirmText"></p>
+    <p id="confirmHint" class="muted"></p>
+    <button id="confirmBtn" class="btn primary"></button>
+  </div>
+
+  <div id="signedOutBox" class="notice" hidden>
+    <p id="signInHint"></p>
+    <button id="signInBtn" class="btn primary"></button>
+  </div>
+
+  <div id="mainBox" hidden>
+    <section class="section">
+      <h2 id="quickAddTitle"></h2>
+      <input id="todoText" type="text" autocomplete="off">
+      <div class="row">
+        <label class="field">
+          <span id="categoryLabel"></span>
+          <select id="todoCategory"></select>
+        </label>
+        <label class="field">
+          <span id="priorityLabel"></span>
+          <select id="todoPriority"></select>
+        </label>
+        <label class="field">
+          <span id="dueDateLabel"></span>
+          <input id="todoDue" type="date">
+        </label>
+      </div>
+      <div class="row">
+        <button id="addBtn" class="btn primary"></button>
+        <button id="savePageBtn" class="btn"></button>
+      </div>
+      <p id="pageTitle" class="muted page-title"></p>
+    </section>
+
+    <section class="section">
+      <h2 id="dueTitle"></h2>
+      <p id="loadingHabits" class="muted"></p>
+      <ul id="habitList" class="habit-list"></ul>
+      <p id="noHabits" class="muted" hidden></p>
+    </section>
+  </div>
+
+  <p id="statusLine" class="status-line" aria-live="polite"></p>
+
+  <footer class="popup-footer">
+    <button id="openAppBtn" class="btn linklike"></button>
+    <button id="signOutBtn" class="btn linklike" hidden></button>
+  </footer>
+</div>
+<script type="module" src="popup.js"></script>
+</body>
+</html>

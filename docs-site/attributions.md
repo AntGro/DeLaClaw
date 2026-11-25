@@ -54,6 +54,15 @@ DeLaClaw uses the following third-party software and assets. No npm dependencies
 - **Purpose**: brand SVG icon for NanoClaw agent pill
 - **Loaded from**: `icons/brand/nanoclaw.svg` (self-hosted, sourced from dashboard-icons collection)
 
+## Analytics
+
+### Cloudflare Web Analytics
+- **Service**: Cloudflare Web Analytics (beacon)
+- **License**: Cloudflare Terms of Service
+- **Source**: https://www.cloudflare.com/web-analytics/
+- **Loaded from**: `https://static.cloudflareinsights.com/beacon.min.js` (script tag in `index.html`); reports to `https://cloudflareinsights.com`
+- **Purpose**: privacy-friendly page analytics; no cookies, no personal data collected
+
 ## Docs Site
 
 The documentation site (`docs-site/`) uses the following libraries loaded from CDN:

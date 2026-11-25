@@ -144,7 +144,7 @@ Tests covering unit logic, adapter compliance, import/export, and structural che
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — see [NOTICE](NOTICE) for attribution requirements.
+[PolyForm Noncommercial 1.0.0](LICENSE) — see [NOTICE](NOTICE) for the attribution request.
 
 DeLaClaw is source-available, not open source. You can use, modify, and distribute it for noncommercial purposes under the terms of the PolyForm Noncommercial License 1.0.0. Commercial use requires a separate license from the copyright holder. Versions released before October 2026 were distributed under AGPL-3.0 and remain available under those terms.
 

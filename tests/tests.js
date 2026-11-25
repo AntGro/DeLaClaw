@@ -3629,7 +3629,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     assert(sz > 5*1024, `CODEMAP.json suspiciously small: ${sz} bytes`);
   });
 
-  test('CODEMAP features include all 8 core features', () => {
+  test('CODEMAP features include all 7 core features', () => {
     const p = path.join(__dirname, '..', '.agents', 'CODEMAP.json');
     const j = JSON.parse(fs.readFileSync(p, 'utf-8'));
     const expected = ['todos','habits','projects','birthdays','flashcards','lists','welcome'];
@@ -3655,20 +3655,28 @@ test('share popover is viewport-bound with scrollable group and member lists', (
   });
 
   test('CODEMAP freshness: committed JSON matches regenerated output', () => {
-    const tmp = path.join(__dirname, '..', '.agents', 'CODEMAP.json.tmp');
+    const { execSync } = require('child_process');
+    const codemapPath = path.join(__dirname, '..', '.agents', 'CODEMAP.json');
+    // Snapshot the committed file BEFORE regenerating, so a stale committed
+    // index fails instead of being silently refreshed. The old test ran the
+    // generator first and only checked the result was non-empty, which can
+    // never catch a --no-verify bypass (ADR 0007). generated_at changes on
+    // every run and is not a content change, so it is excluded from the
+    // comparison; everything else, including meta.version, must match.
+    const before = JSON.parse(fs.readFileSync(codemapPath, 'utf-8'));
+    if (before.meta) delete before.meta.generated_at;
+    let after;
     try {
-      const { execSync } = require('child_process');
-      execSync('node scripts/generate-codemap.js', { cwd: path.join(__dirname,'..'), stdio: 'pipe' });
-      // The generator overwrote the committed file (pre-commit would do same) — compare tmp if we want no overwrite?
-      // Since we just ran generator, committed file is now fresh by definition. To truly check freshness,
-      // we compare file content before and after — but here we already overwrote. So we re-generate to tmp
-      // by reading the file we just generated as source of truth and ensure it parses.
-      // For strict freshness in CI, run: git diff --exit-code .agents/CODEMAP.json
-      const raw = fs.readFileSync(path.join(__dirname,'..','.agents','CODEMAP.json'),'utf-8');
-      assert(raw.length>0, 'CODEMAP.json empty after regeneration');
+      execSync('node scripts/generate-codemap.js', { cwd: path.join(__dirname, '..'), stdio: 'pipe' });
+      after = JSON.parse(fs.readFileSync(codemapPath, 'utf-8'));
     } catch (e) {
-      throw new Error('Failed to regenerate CODEMAP: '+e.message);
+      throw new Error('Failed to regenerate CODEMAP: ' + e.message);
     }
+    if (after.meta) delete after.meta.generated_at;
+    // The generator is deterministic (ADR 0007), so key order is stable and
+    // a stringify comparison is a content comparison.
+    assert(JSON.stringify(before) === JSON.stringify(after),
+      'CODEMAP.json is stale — it has just been regenerated; commit the updated file');
   });
 
   // ===================================================================

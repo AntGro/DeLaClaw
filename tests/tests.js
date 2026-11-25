@@ -543,6 +543,17 @@ test('style.css lets the Welcome strip scroll inside its section', () => {
     'Missing Welcome strip scroll rule');
 });
 
+// renderLists() replaces the whole lists grid and restores window.scrollY
+// itself; Chrome's scroll anchoring would re-adjust the scroll after the
+// restore, because the anchor row was destroyed by the re-render (ticking
+// an item jumped the window, v2.32.176). The grid opts out of anchoring.
+// Structural pin only — the behaviour is covered by the browser verify
+// (tick in a section list with the window scrolled: scrollY unchanged).
+test('style.css disables scroll anchoring on the lists grid', () => {
+  assert(styleCss.includes('#listsGrid{overflow-anchor:none;}'),
+    'Missing #listsGrid overflow-anchor rule');
+});
+
 // The strip must agree with the day panel: both use the Calendar tab's
 // funnel filter, so a strip cell never shows a TODO/habit its day panel
 // would hide (reported: Dec 13 showed habits on the strip, "Nothing

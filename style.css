@@ -586,6 +586,11 @@ input,select,button{font-family:inherit;}
 
 /* ===== PROJECT GRID ===== */
 .project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:14px;justify-content:center;}
+/* Lists grid: no scroll anchoring — renderLists() replaces the whole grid
+   and restores window.scrollY itself; Chrome's anchoring would re-adjust
+   the scroll after the restore, because the anchor row was destroyed by the
+   re-render (tick jump, v2.32.176). */
+#listsGrid{overflow-anchor:none;}
 .project-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;transition:all 0.25s ease;max-height:min(100vh, max(750px, 50vh));max-width:max(50vw,800px);container-type:inline-size;}
 .project-card:hover{box-shadow:0 4px 20px rgba(0,0,0,0.15),0 0 0 1px var(--accent-dim);}
 .project-card[style*="--cat-color"]{border-top:none;border-radius:11px;background:color-mix(in srgb, var(--cat-color) 6%, var(--surface));}

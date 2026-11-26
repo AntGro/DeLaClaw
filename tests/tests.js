@@ -554,6 +554,18 @@ test('style.css disables scroll anchoring on the lists grid', () => {
     'Missing #listsGrid overflow-anchor rule');
 });
 
+// A long link in a list item text overflowed the card on phone (reported
+// 26 Nov 2026): .list-item-text had no wrapping protection and the
+// .task-text a break-all rule did not cover list items. Same gap on the
+// note, which renders markdown the same way. Structural pin only — the
+// behaviour is covered by the browser verify (long URLs, 390/320px).
+test('style.css lets long links wrap inside list item text and notes', () => {
+  assert(styleCss.includes('.list-item-text{flex:1;min-width:0;font-size:0.88rem;font-weight:500;overflow-wrap:break-word;word-break:break-word;}'),
+    'Missing list-item-text wrapping rule');
+  assert(styleCss.includes('.list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;overflow-wrap:break-word;word-break:break-word;}'),
+    'Missing list-item-note wrapping rule');
+});
+
 // The strip must agree with the day panel: both use the Calendar tab's
 // funnel filter, so a strip cell never shows a TODO/habit its day panel
 // would hide (reported: Dec 13 showed habits on the strip, "Nothing

@@ -665,7 +665,7 @@ function renderListItem(item) {
     ${sharedHtml}
     <div class="list-item-row">
       <button class="list-check-btn" data-action="toggle-list-item-check" data-id="${esc(item.id)}" title="Toggle">${checkIcon}</button>
-      <div style="flex:1;min-width:0;">
+      <div class="list-item-content">
         <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>
         ${noteHtml}
         ${attachmentsHtml}

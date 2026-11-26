@@ -2040,8 +2040,9 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .list-item-checked{opacity:0.5;}
 .list-item-checked .list-item-text{text-decoration:line-through;}
 .list-item-row{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;}
-.list-item-text{flex:1;min-width:0;font-size:0.88rem;font-weight:500;overflow-wrap:break-word;word-break:break-word;}
-.list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;overflow-wrap:break-word;word-break:break-word;}
+.list-item-content{flex:1;min-width:0;overflow-wrap:anywhere;}
+.list-item-text{font-size:0.88rem;font-weight:500;}
+.list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;}
 .list-item-attachments{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
 .list-attachment-chip{display:inline-flex;align-items:center;gap:2px;font-size:0.75rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:2px 4px;max-width:100%;}
 .list-attachment-chip a{display:inline-flex;align-items:center;gap:3px;color:var(--accent);text-decoration:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}

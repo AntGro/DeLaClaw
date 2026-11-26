@@ -555,15 +555,19 @@ test('style.css disables scroll anchoring on the lists grid', () => {
 });
 
 // A long link in a list item text overflowed the card on phone (reported
-// 26 Nov 2026): .list-item-text had no wrapping protection and the
-// .task-text a break-all rule did not cover list items. Same gap on the
-// note, which renders markdown the same way. Structural pin only — the
-// behaviour is covered by the browser verify (long URLs, 390/320px).
-test('style.css lets long links wrap inside list item text and notes', () => {
-  assert(styleCss.includes('.list-item-text{flex:1;min-width:0;font-size:0.88rem;font-weight:500;overflow-wrap:break-word;word-break:break-word;}'),
-    'Missing list-item-text wrapping rule');
-  assert(styleCss.includes('.list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;overflow-wrap:break-word;word-break:break-word;}'),
-    'Missing list-item-note wrapping rule');
+// 26 Nov 2026). The first fix (v2.32.182) put the wrapping rules on the
+// inline .list-item-text span; the review of aac524f showed the flex
+// sizing there was dead — the real flex item is the wrapper div. The rules
+// now live on .list-item-content (overflow-wrap:anywhere), and the text
+// and note inherit them. Structural pin only — the behaviour is covered by
+// the browser verify (long URLs, 390/320px, text and note).
+test('style.css wraps long links via the list item content wrapper', () => {
+  assert(styleCss.includes('.list-item-content{flex:1;min-width:0;overflow-wrap:anywhere;}'),
+    'Missing list-item-content wrapping rule');
+  assert(styleCss.includes('.list-item-text{font-size:0.88rem;font-weight:500;}'),
+    'list-item-text should not carry its own flex/wrapping rules');
+  assert(styleCss.includes('.list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;}'),
+    'list-item-note should not carry its own wrapping rules');
 });
 
 // The strip must agree with the day panel: both use the Calendar tab's

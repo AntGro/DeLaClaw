@@ -556,6 +556,18 @@ test('style.css Coming Up: month size, inline weekday, 640px single-column switc
   assert(dowIdx !== -1 && dowIdx < mq, 'Welcome strip weekday must show at all widths, not only in the phone media query');
 });
 
+// Quick-add share button (v2.32.188): the Lists row styles all its buttons
+// through the wrapper, like Habits' .todo-cat-add — so the share button
+// gets the same boxed chrome as the + button instead of the bare icon.
+test('style.css lists quick-add buttons share one row rule', () => {
+  assert(styleCss.includes('.list-quick-add button{'),
+    'Lists quick-add must style all row buttons through the wrapper');
+  assert(styleCss.includes('.list-quick-add button:hover{'),
+    'Lists quick-add hover must cover all row buttons');
+  assert(!styleCss.includes('.list-quick-add-btn'),
+    'No CSS rule must target the + button class alone (the share button would lose the row chrome)');
+});
+
 // The strip scrolls inside its capped section like .welcome-items does,
 // instead of clipping its bottom rows on phones. Rows must stay
 // content-sized: a definite-height grid would otherwise compress them

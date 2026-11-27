@@ -36,6 +36,7 @@ User jobs:
 - **Search:** `filterLists` / `listSearchQuery` — filters across list names and item names
 - **`__shared__` list:** auto-created on first shared item sync, hidden when empty, purple color
 - **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Attach + Edit plus a kebab menu holding share/copy-link/delete (see todos.md for the shared mechanism in `item-utils.js`). The attach button only renders in Drive mode, so demo shows Edit alone. Desktop unchanged.
+- **Row-action columns (v2.32.189):** the item actions lay out 3-across like TODOs/Habits — the old `cols-2` class (2 columns whenever a share button was present) is gone, so 5 buttons form 2 rows of 3.
 
 ## Interaction Guards
 - **Pending sets:**

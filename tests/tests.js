@@ -795,6 +795,17 @@ test('collapsed row actions stay display:grid so the reveal slides smoothly', ()
   }
 });
 
+// Row-action columns (v2.32.189): Lists lay out 3-across like TODOs/Habits —
+// no per-list column class, so 5–6 buttons form 2 rows of 3.
+test('lists row actions use the shared 3-column layout, no cols-2', () => {
+  assert(styleCss.includes('.list-item-actions{display:grid;grid-template-columns:auto auto auto;'),
+    'Lists item actions must lay out 3-across like TODOs/Habits');
+  assert(!styleCss.includes('cols-2'),
+    'No cols-2 rule must remain anywhere in the stylesheet');
+  assert(!jsFiles['lists.js'].includes('cols-2'),
+    'lists.js must not emit the cols-2 class');
+});
+
 // Day modal: the page behind it must not scroll (Welcome and Calendar
 // share the modal), and opening an item modal from it must stack above
 // it — blurred behind — instead of closing it, so exiting the item

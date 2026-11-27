@@ -15,6 +15,7 @@ Lists are general-purpose checklists — anything that doesn't fit TODOs, habits
 - Item text shows truncated at 120 characters with a show-more; notes at 500 with a show-more.
 - Quick-add from the list; inline edit saves only on Enter or the confirm button — clicking away cancels, never saves.
 - Items reorder by long-press drag (150ms), within a list or across lists: moving an item to another list updates its `list_id` and re-numbers `sort_order` on both lists. A shared item keeps its sharing data when moved — only the list is local.
+- A list taller than its 400px height shows a subtle shadow at the top edge while there is more content above, and at the bottom edge while there is more below.
 
 ## Search
 

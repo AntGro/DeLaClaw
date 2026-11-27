@@ -12,6 +12,7 @@ import { DRIVE_SCOPE_FILE, clearStoredDriveEmail, getStoredDriveEmail } from './
 import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileAll as reconcileCalendar, reconcileLedger as reconcileCalendarLedger, syncTable as syncCalendarTable, markDirty as markCalDirty, markCategoryRenamed, deleteTypeEvents, pushType as pushCalType, resetCalendar as resetCalendarForImport, CAT_TABLE_TO_ITEM_TABLE } from './calendar-sync.js';
 
 import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP, swipeDirection } from './utils.js';
+import { initScrollEdgeShadows } from './item-utils.js';
 import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
          renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
@@ -713,6 +714,8 @@ function requestStoragePersistence() {
 
 document.addEventListener('DOMContentLoaded', () => {
   requestStoragePersistence();
+  // Scroll-edge shadows on list containers (one delegated listener).
+  initScrollEdgeShadows();
   // Touch-first layout: row actions collapse to two primary + kebab menu.
   document.documentElement.classList.toggle('touch', isTouchDevice());
   // Wrap all save/add/submit actions with guard() to prevent double-fire

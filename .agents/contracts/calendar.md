@@ -62,7 +62,9 @@ for the Google Calendar mirror.)
   them lowercase in French/Spanish); locale word order and particles stay
   untouched. No-op in English.
 - `collectRangeEvents` / `dayCellHTML` are exported for the Welcome
-  strip. `collectRangeEvents` takes an optional `show` override (default:
+  strip. `dayCellHTML` wraps the day number and the weekday label in one
+  `.cal-day-head` row, so the weekday always sits next to the number.
+  `collectRangeEvents` takes an optional `show` override (default:
   the tab's funnel filter) — the strip uses the default, so its cells
   agree with the day panel; a caller that must ignore the filter passes
   all-true explicitly.

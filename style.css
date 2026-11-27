@@ -640,7 +640,18 @@ input,select,button{font-family:inherit;}
 .project-link:hover{color:var(--accent);}
 
 /* ===== TASK LIST ===== */
-.task-list{padding:10px 16px 4px;flex:1;min-height:50px;max-height:var(--task-list-max-height, 400px);overflow-y:auto;transition:max-height 0.3s ease;display:flex;flex-direction:column;gap:4px;}
+.task-list{padding:10px 16px 4px;flex:1;min-height:50px;max-height:var(--task-list-max-height, 400px);overflow-y:auto;transition:max-height 0.3s ease,box-shadow 0.2s ease;display:flex;flex-direction:column;gap:4px;}
+
+/* Scroll-edge shadows (v2.32.185): an inset shadow at the edge of a
+   scrollable list signals more content in that direction. The classes
+   are set by updateScrollEdgeShadows() in item-utils.js — one delegated
+   scroll listener plus a re-apply after each re-render. */
+.scrollable--more-above{box-shadow:inset 0 12px 10px -6px rgba(0,0,0,0.28);}
+.scrollable--more-below{box-shadow:inset 0 -12px 10px -6px rgba(0,0,0,0.28);}
+.scrollable--more-above.scrollable--more-below{box-shadow:inset 0 12px 10px -6px rgba(0,0,0,0.28),inset 0 -12px 10px -6px rgba(0,0,0,0.28);}
+[data-theme="light"] .scrollable--more-above{box-shadow:inset 0 12px 10px -6px rgba(0,0,0,0.14);}
+[data-theme="light"] .scrollable--more-below{box-shadow:inset 0 -12px 10px -6px rgba(0,0,0,0.14);}
+[data-theme="light"] .scrollable--more-above.scrollable--more-below{box-shadow:inset 0 12px 10px -6px rgba(0,0,0,0.14),inset 0 -12px 10px -6px rgba(0,0,0,0.14);}
 .task-item{border-left:3px solid transparent;}
 .task-item.task-status-todo{border-left-color:var(--muted);}
 .task-item.task-status-in-progress{border-left-color:var(--blue);}
@@ -1098,7 +1109,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
   .todo-cat-add button{width:32px;height:32px;}
   .list-quick-add{padding:10px 12px 8px;}
   .list-quick-input{padding:10px 12px;}
-  .list-quick-add-btn{width:32px;height:32px;}
+  .list-quick-add button{width:32px;height:32px;}
   .todo-cat-header-actions{opacity:1;}
 
   /* Bucket items: bigger tap targets on mobile */
@@ -1861,7 +1872,7 @@ html.touch .tr-progress-bar.tr-bar-expanded .tr-seg { flex:0 0 28px; height:28px
 #welcome-bucket-todos > .welcome-section-header,#welcome-bucket-habits > .welcome-section-header{margin-bottom:0;}
 .welcome-section-header svg{flex-shrink:0;}
 
-.welcome-items{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow-y:auto;}
+.welcome-items{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow-y:auto;transition:box-shadow 0.2s ease;}
 .welcome-item{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:6px;cursor:pointer;transition:background 0.15s;}
 .welcome-item:hover{background:var(--accent-dim);}
 .welcome-item-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -2040,6 +2051,7 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .list-item-checked{opacity:0.5;}
 .list-item-checked .list-item-text{text-decoration:line-through;}
 .list-item-row{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;}
+.list-item-content{flex:1;min-width:0;overflow-wrap:anywhere;}
 .list-item-text{font-size:0.88rem;font-weight:500;}
 .list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;}
 .list-item-attachments{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
@@ -2065,8 +2077,8 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .list-quick-add{padding:10px 16px 10px;display:flex;gap:6px;align-items:flex-end;}
 .list-quick-input{flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.84rem;font-family:inherit;line-height:1.4;}
 .list-quick-input:focus{outline:none;border-color:var(--accent);}
-.list-quick-add-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;width:34px;height:34px;padding:0;cursor:pointer;color:var(--muted);transition:all 0.15s;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0;}
-.list-quick-add-btn:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface));}
+.list-quick-add button{background:var(--surface);border:1px solid var(--border);border-radius:6px;width:34px;height:34px;padding:0;cursor:pointer;color:var(--muted);transition:color 0.15s,border-color 0.15s,background 0.15s;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0;}
+.list-quick-add button:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface));}
 .list-saving-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin-save 0.6s linear infinite;}
 @keyframes spin-save{to{transform:rotate(360deg);}}
 @media(max-width:600px){
@@ -2174,13 +2186,17 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
    and day cells have overflow:hidden (automatic minimum size 0), so a
    plain grid would compress the rows below content height instead of
    overflowing. max-content rows stay full-height, so the strip scrolls. */
-.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;}
-.welcome-cal-month-ctx{font-size:0.78rem;color:var(--muted);font-weight:500;margin-left:auto;}
+.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;transition:box-shadow 0.2s ease;}
+/* The strip shows the weekday next to the day number at every width —
+   unlike the Calendar tab's week view, which reveals it only when the
+   grid wraps. */
+.welcome-calendar-strip .cal-day-dow{display:block;}
+.welcome-cal-month-ctx{font-size:0.95rem;color:var(--muted);font-weight:500;margin-left:auto;}
 .welcome-section[style*="--cat-color"] > .welcome-section-header .welcome-cal-month-ctx{color:#fff;font-weight:500;text-shadow:0 0 2px rgba(0,0,0,0.15);}
 .welcome-cal-nav{margin-left:auto;display:inline-flex;gap:4px;align-items:center;flex-shrink:0;}
 .welcome-cal-nav button{background:transparent;border:1px solid rgba(255,255,255,0.45);color:#fff;border-radius:8px;padding:3px 7px;cursor:pointer;display:inline-flex;align-items:center;font:inherit;font-size:0.78rem;line-height:1;}
 .welcome-cal-nav button:hover{border-color:#fff;background:rgba(255,255,255,0.12);}
-@media(max-width:600px){
+@media(max-width:640px){
   .welcome-calendar-strip{grid-template-columns:1fr;gap:4px;}
   .welcome-cal-month-ctx{display:none;}
   /* Phone rows are full-width, so show titles like the Calendar tab's
@@ -2190,7 +2206,6 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
   .welcome-calendar-strip .cal-chips{display:flex;}
   .welcome-calendar-strip .cal-more{display:block;}
   .welcome-calendar-strip .cal-dots{display:none;}
-  .welcome-calendar-strip .cal-day-dow{display:block;}
 }
 
 .env-badge{position:fixed;top:44px;left:14px;z-index:99;padding:2px 8px;border-radius:4px;font-size:0.65rem;font-weight:700;font-family:'DM Mono',monospace;letter-spacing:0.08em;opacity:0.7;pointer-events:none;background:var(--accent);color:#fff;}
@@ -2474,6 +2489,7 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
 }
 .cal-day:hover { border-color: var(--accent); }
 .cal-day.cal-out { opacity: 0.38; }
+.cal-day-head{display:flex;align-items:baseline;gap:6px;}
 .cal-day-num {
   font-size: 0.8rem;
   font-weight: 600;
@@ -2587,6 +2603,7 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
   max-height: 60vh;
   overflow-y: auto;
   margin: 8px 0 4px;
+  transition: box-shadow 0.2s ease;
 }
 .cal-group-label {
   font-size: 0.72rem;

@@ -531,7 +531,41 @@ test('style.css shows Welcome strip titles on phones (not dots-only)', () => {
   assert(styleCss.includes('.welcome-calendar-strip .cal-dots{display:none;}'),
     'Missing Welcome phone dots override');
   assert(styleCss.includes('.welcome-calendar-strip .cal-day-dow{display:block;}'),
-    'Missing Welcome phone weekday override');
+    'Missing Welcome strip weekday rule');
+});
+
+// Coming Up (v2.32.186): the month label matches the section-header size,
+// the weekday sits next to the day number in the cell header row, and the
+// strip switches to one-day-per-row at 640px — the width where the
+// compact-phones rule hides chips — so the dots-only state never appears.
+test('style.css Coming Up: month size, inline weekday, 640px single-column switch', () => {
+  assert(styleCss.includes('.welcome-cal-month-ctx{font-size:0.95rem;color:var(--muted);font-weight:500;margin-left:auto;}'),
+    'Month label must match the section-header size');
+  assert(styleCss.includes('.cal-day-head{display:flex;align-items:baseline;gap:6px;}'),
+    'Missing day-cell header row for number + weekday');
+  const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+  assert(cal.includes('<span class="cal-day-head"><span class="cal-day-num">'),
+    'dayCellHTML must wrap the number and weekday in the header row');
+  const mq = styleCss.indexOf('@media(max-width:640px){');
+  assert(mq !== -1, 'Welcome strip media query must be 640px');
+  const nextMq = styleCss.indexOf('@media', mq + 1);
+  const block = styleCss.slice(mq, nextMq === -1 ? undefined : nextMq);
+  assert(block.includes('.welcome-calendar-strip{grid-template-columns:1fr;gap:4px;}'),
+    'Welcome strip must switch to one-day-per-row at 640px');
+  const dowIdx = styleCss.indexOf('.welcome-calendar-strip .cal-day-dow{display:block;}');
+  assert(dowIdx !== -1 && dowIdx < mq, 'Welcome strip weekday must show at all widths, not only in the phone media query');
+});
+
+// Quick-add share button (v2.32.188): the Lists row styles all its buttons
+// through the wrapper, like Habits' .todo-cat-add — so the share button
+// gets the same boxed chrome as the + button instead of the bare icon.
+test('style.css lists quick-add buttons share one row rule', () => {
+  assert(styleCss.includes('.list-quick-add button{'),
+    'Lists quick-add must style all row buttons through the wrapper');
+  assert(styleCss.includes('.list-quick-add button:hover{'),
+    'Lists quick-add hover must cover all row buttons');
+  assert(!styleCss.includes('.list-quick-add-btn'),
+    'No CSS rule must target the + button class alone (the share button would lose the row chrome)');
 });
 
 // The strip scrolls inside its capped section like .welcome-items does,
@@ -539,7 +573,7 @@ test('style.css shows Welcome strip titles on phones (not dots-only)', () => {
 // content-sized: a definite-height grid would otherwise compress them
 // (day cells have overflow:hidden, so their automatic minimum is 0).
 test('style.css lets the Welcome strip scroll inside its section', () => {
-  assert(styleCss.includes('.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;}'),
+  assert(styleCss.includes('.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;transition:box-shadow 0.2s ease;}'),
     'Missing Welcome strip scroll rule');
 });
 
@@ -552,6 +586,22 @@ test('style.css lets the Welcome strip scroll inside its section', () => {
 test('style.css disables scroll anchoring on the lists grid', () => {
   assert(styleCss.includes('#listsGrid{overflow-anchor:none;}'),
     'Missing #listsGrid overflow-anchor rule');
+});
+
+// A long link in a list item text overflowed the card on phone (reported
+// 26 Nov 2026). The first fix (v2.32.182) put the wrapping rules on the
+// inline .list-item-text span; the review of aac524f showed the flex
+// sizing there was dead — the real flex item is the wrapper div. The rules
+// now live on .list-item-content (overflow-wrap:anywhere), and the text
+// and note inherit them. Structural pin only — the behaviour is covered by
+// the browser verify (long URLs, 390/320px, text and note).
+test('style.css wraps long links via the list item content wrapper', () => {
+  assert(styleCss.includes('.list-item-content{flex:1;min-width:0;overflow-wrap:anywhere;}'),
+    'Missing list-item-content wrapping rule');
+  assert(styleCss.includes('.list-item-text{font-size:0.88rem;font-weight:500;}'),
+    'list-item-text should not carry its own flex/wrapping rules');
+  assert(styleCss.includes('.list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;}'),
+    'list-item-note should not carry its own wrapping rules');
 });
 
 // The strip must agree with the day panel: both use the Calendar tab's
@@ -5850,6 +5900,30 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(fn[1].indexOf('bucketKey(el)') < fn[1].indexOf("closest('[id]')"), 'the container\'s own id must win over the shared ancestor id');
     });
 
+    test('scroll-edge shadows: inset cue while a list has more above/below', () => {
+      const iu = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(iu.includes('export function updateScrollEdgeShadows(') && iu.includes('export function refreshScrollEdgeShadows(') && iu.includes('export function initScrollEdgeShadows('),
+        'scroll-edge helpers must exist in item-utils.js');
+      // One delegated capture-phase scroll listener, not per-element ones
+      // (elements are recreated on every re-render).
+      assert(iu.includes("window.addEventListener('scroll'") && iu.includes("t.matches(SCROLL_EDGE_SELECTOR)"),
+        'scroll-edge updates must come from one delegated capture-phase listener');
+      // Re-renders must re-apply the classes: every list render goes
+      // through the shared restore, including first renders (empty map).
+      assert(iu.includes('refreshScrollEdgeShadows(gridEl)') && iu.slice(iu.indexOf('export function restoreInnerScrollPositions')).includes('refreshScrollEdgeShadows(gridEl)'),
+        'restoreInnerScrollPositions must re-apply scroll-edge shadows');
+      assert(iu.includes('.welcome-calendar-strip'), 'the shadow selector must also cover .welcome-calendar-strip');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.scrollable--more-above{box-shadow:inset 0 12px') && css.includes('.scrollable--more-below{box-shadow:inset 0 -12px'),
+        'scroll-edge shadows must be inset box-shadows at the top/bottom edge');
+      assert(css.includes('[data-theme="light"] .scrollable--more-above'),
+        'scroll-edge shadows must have a light-theme value');
+      assert(css.includes('transition:max-height 0.3s ease,box-shadow 0.2s ease'),
+        '.task-list must transition box-shadow so the edge cue fades, not snaps');
+      const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(main.includes('initScrollEdgeShadows()'), 'boot must install the scroll-edge listener');
+    });
+
     test('calendar grid: chips sort Birthday > Events > TODOs > Habits', () => {
       const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
       assert(cal.includes('const TYPE_ORDER = { birthday: 0, event: 1, todo: 2, habit: 3 };'),
@@ -10834,6 +10908,26 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         const fnSlice = src.slice(src.indexOf(`async function ${mover}(`), src.indexOf(`async function ${mover}(`) + 900);
         assert(fnSlice.includes('snapshotBuckets(grid)') && fnSlice.includes('animateBucketsFromSnapshot(grid, snapshot, 600)'),
           `${name} ${mover} must FLIP-animate cards across the move re-render`);
+      }
+    });
+
+    test('rank changes FLIP-animate rows: habit Done and list tick', () => {
+      // Marking a habit done / ticking a list item re-sorts the row, and
+      // the render rebuilds the rows — so the move must be FLIP-animated
+      // from a snapshot taken before the save (see item-utils.js).
+      const itemUtils = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtils.includes('export function snapshotRows(') && itemUtils.includes('export function animateRowsFromSnapshot('),
+        'row FLIP helpers must exist in item-utils.js');
+      for (const [name, src, fn, grid, row, key] of [
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8'), 'markHabitDoneNow', 'habitCategoryGrid', '.habit-item', 'data-habit-id'],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8'), 'toggleListItemCheck', 'listsGrid', '.list-item', 'data-item-id'],
+      ]) {
+        const start = src.indexOf(`async function ${fn}(`);
+        const fnSlice = src.slice(start, start + 9000);
+        assert(fnSlice.includes('snapshotRows(') && fnSlice.includes('animateRowsFromSnapshot('),
+          `${name} ${fn} must snapshot rows before the save and animate after the re-render`);
+        assert(fnSlice.includes(grid) && fnSlice.includes(`'${row}'`) && fnSlice.includes(`'${key}'`),
+          `${name} ${fn} must FLIP the ${row} rows of #${grid} keyed by ${key}`);
       }
     });
 

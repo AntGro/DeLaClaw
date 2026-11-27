@@ -2,7 +2,7 @@ import { lucideIcon } from './icons.js';
 import state, { LIST_NOTE_MAX_LEN, MAX_META_DISPLAY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, applySectionGrid, truncateWithShowMore, fetchAll, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration } from './sections-pure.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, snapshotRows, animateRowsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 
@@ -652,7 +652,6 @@ function renderListItem(item) {
 
   // Shared list item badge
   const isShared = item.shared_id && item.shared_group_id;
-  const hasShareBtn = isShared || (!isShared && !!state.sharing);
   // Drive-only: the upload needs the Drive adapter (absent in Demo/Local).
   const canAttach = typeof state.driveAdapter?.uploadAttachment === 'function';
   let sharedHtml = '';
@@ -665,12 +664,12 @@ function renderListItem(item) {
     ${sharedHtml}
     <div class="list-item-row">
       <button class="list-check-btn" data-action="toggle-list-item-check" data-id="${esc(item.id)}" title="Toggle">${checkIcon}</button>
-      <div style="flex:1;min-width:0;">
+      <div class="list-item-content">
         <span class="list-item-text">${truncateWithShowMore(item.text, 120, item.id, 'listtext')}</span>
         ${noteHtml}
         ${attachmentsHtml}
       </div>
-      <div class="list-item-actions${hasShareBtn ? ' cols-2' : ''}">
+      <div class="list-item-actions">
         ${!isShared && state.sharing ? `<button data-action="share-existing-list-item" data-id="${esc(item.id)}" title="${t('sharing.share')}">${lucideIcon('share', 14)}</button>` : ''}
         ${isShared && _myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="unshare-list-item" data-id="${esc(item.id)}" title="${t('sharing.unshare')}">${lucideIcon('share-off', 14)}</button>` : ''}
         ${isShared && !_myCreatedSharedListItemIds.has(item.shared_id) ? `<button data-action="copy-list-item-to-personal" data-id="${esc(item.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon('copy', 14)}</button>` : ''}
@@ -1079,6 +1078,11 @@ async function toggleListItemCheck(id, btnEl) {
   if (_pendingListItemToggles.has(id)) return;
   _pendingListItemToggles.add(id);
 
+  // FLIP: snapshot row positions before the save — the render rebuilds
+  // the grid, so the rank change glides from these positions.
+  const listsGrid = document.getElementById('listsGrid');
+  const rowSnapshot = snapshotRows(listsGrid, '.list-item', 'data-item-id');
+
   const safeId = CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\"');
   const allBtns = document.querySelectorAll(`button[data-action="toggle-list-item-check"][data-id="${safeId}"]`);
   const targetBtn = btnEl instanceof HTMLElement ? btnEl : (allBtns[0] || null);
@@ -1119,6 +1123,8 @@ async function toggleListItemCheck(id, btnEl) {
     renderLists();
   } finally {
     _pendingListItemToggles.delete(id);
+    // The render above rebuilt the grid; glide moved rows to their new ranks.
+    animateRowsFromSnapshot(listsGrid, '.list-item', 'data-item-id', rowSnapshot);
     toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving', 'is-pending'); b.removeAttribute('aria-busy'); });
   }
 }

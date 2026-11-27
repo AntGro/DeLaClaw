@@ -531,7 +531,7 @@ test('style.css shows Welcome strip titles on phones (not dots-only)', () => {
   assert(styleCss.includes('.welcome-calendar-strip .cal-dots{display:none;}'),
     'Missing Welcome phone dots override');
   assert(styleCss.includes('.welcome-calendar-strip .cal-day-dow{display:block;}'),
-    'Missing Welcome phone weekday override');
+    'Missing Welcome strip weekday rule');
 });
 
 // Coming Up (v2.32.186): the month label matches the section-header size,

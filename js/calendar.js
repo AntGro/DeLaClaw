@@ -341,11 +341,13 @@ function dayCellHTML(date, inMonth, events, dowLabel) {
   // Week view passes its weekday label: on narrow screens the week
   // grid wraps to two rows, the 7-column header no longer aligns,
   // and the weekday is shown inside the cell instead (CSS reveals
-  // .cal-day-dow only in that layout).
+  // .cal-day-dow only in that layout). The number and the weekday share
+  // one header row (.cal-day-head), so the weekday always sits next to
+  // the number, never below it.
   const dow = dowLabel ? `<span class="cal-day-dow">${esc(dowLabel)}</span>` : '';
   return `<button class="cal-day${inMonth ? '' : ' cal-out'}${date === todayStr() ? ' cal-today' : ''}"
       data-action="open-calendar-day" data-date="${date}">
-    <span class="cal-day-num">${dayNum}</span>${dow}
+    <span class="cal-day-head"><span class="cal-day-num">${dayNum}</span>${dow}</span>
     <span class="cal-chips">${chips}${more}</span>
     <span class="cal-dots">${dots}</span>
   </button>`;

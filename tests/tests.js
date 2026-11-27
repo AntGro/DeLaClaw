@@ -534,6 +534,28 @@ test('style.css shows Welcome strip titles on phones (not dots-only)', () => {
     'Missing Welcome phone weekday override');
 });
 
+// Coming Up (v2.32.186): the month label matches the section-header size,
+// the weekday sits next to the day number in the cell header row, and the
+// strip switches to one-day-per-row at 640px — the width where the
+// compact-phones rule hides chips — so the dots-only state never appears.
+test('style.css Coming Up: month size, inline weekday, 640px single-column switch', () => {
+  assert(styleCss.includes('.welcome-cal-month-ctx{font-size:0.95rem;color:var(--muted);font-weight:500;margin-left:auto;}'),
+    'Month label must match the section-header size');
+  assert(styleCss.includes('.cal-day-head{display:flex;align-items:baseline;gap:6px;}'),
+    'Missing day-cell header row for number + weekday');
+  const cal = fs.readFileSync(path.join(JS_DIR, 'calendar.js'), 'utf-8');
+  assert(cal.includes('<span class="cal-day-head"><span class="cal-day-num">'),
+    'dayCellHTML must wrap the number and weekday in the header row');
+  const mq = styleCss.indexOf('@media(max-width:640px){');
+  assert(mq !== -1, 'Welcome strip media query must be 640px');
+  const nextMq = styleCss.indexOf('@media', mq + 1);
+  const block = styleCss.slice(mq, nextMq === -1 ? undefined : nextMq);
+  assert(block.includes('.welcome-calendar-strip{grid-template-columns:1fr;gap:4px;}'),
+    'Welcome strip must switch to one-day-per-row at 640px');
+  const dowIdx = styleCss.indexOf('.welcome-calendar-strip .cal-day-dow{display:block;}');
+  assert(dowIdx !== -1 && dowIdx < mq, 'Welcome strip weekday must show at all widths, not only in the phone media query');
+});
+
 // The strip scrolls inside its capped section like .welcome-items does,
 // instead of clipping its bottom rows on phones. Rows must stay
 // content-sized: a definite-height grid would otherwise compress them

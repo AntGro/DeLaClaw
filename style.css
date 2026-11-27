@@ -2187,12 +2187,16 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
    plain grid would compress the rows below content height instead of
    overflowing. max-content rows stay full-height, so the strip scrolls. */
 .welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;transition:box-shadow 0.2s ease;}
-.welcome-cal-month-ctx{font-size:0.78rem;color:var(--muted);font-weight:500;margin-left:auto;}
+/* The strip shows the weekday next to the day number at every width —
+   unlike the Calendar tab's week view, which reveals it only when the
+   grid wraps. */
+.welcome-calendar-strip .cal-day-dow{display:block;}
+.welcome-cal-month-ctx{font-size:0.95rem;color:var(--muted);font-weight:500;margin-left:auto;}
 .welcome-section[style*="--cat-color"] > .welcome-section-header .welcome-cal-month-ctx{color:#fff;font-weight:500;text-shadow:0 0 2px rgba(0,0,0,0.15);}
 .welcome-cal-nav{margin-left:auto;display:inline-flex;gap:4px;align-items:center;flex-shrink:0;}
 .welcome-cal-nav button{background:transparent;border:1px solid rgba(255,255,255,0.45);color:#fff;border-radius:8px;padding:3px 7px;cursor:pointer;display:inline-flex;align-items:center;font:inherit;font-size:0.78rem;line-height:1;}
 .welcome-cal-nav button:hover{border-color:#fff;background:rgba(255,255,255,0.12);}
-@media(max-width:600px){
+@media(max-width:640px){
   .welcome-calendar-strip{grid-template-columns:1fr;gap:4px;}
   .welcome-cal-month-ctx{display:none;}
   /* Phone rows are full-width, so show titles like the Calendar tab's
@@ -2202,7 +2206,6 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
   .welcome-calendar-strip .cal-chips{display:flex;}
   .welcome-calendar-strip .cal-more{display:block;}
   .welcome-calendar-strip .cal-dots{display:none;}
-  .welcome-calendar-strip .cal-day-dow{display:block;}
 }
 
 .env-badge{position:fixed;top:44px;left:14px;z-index:99;padding:2px 8px;border-radius:4px;font-size:0.65rem;font-weight:700;font-family:'DM Mono',monospace;letter-spacing:0.08em;opacity:0.7;pointer-events:none;background:var(--accent);color:#fff;}
@@ -2486,6 +2489,7 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
 }
 .cal-day:hover { border-color: var(--accent); }
 .cal-day.cal-out { opacity: 0.38; }
+.cal-day-head{display:flex;align-items:baseline;gap:6px;}
 .cal-day-num {
   font-size: 0.8rem;
   font-weight: 600;

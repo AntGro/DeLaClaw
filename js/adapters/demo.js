@@ -57,23 +57,36 @@ export function createDemoAdapter(initialData) {
     /** Re-seed all in-memory data (for demo toggle) */
     reseed(data) { seed(data); },
     /** Run pending Drive migrations against the in-memory store (used by
-        backup restore when the backup's schema is behind the app). Like
-        the Local runner, a failing migration stops the batch — nothing
-        persists in demo mode, so a failed run leaves the store as-is
-        until the next reseed. */
+        backup restore when the backup's schema is behind the app). */
     async runPendingMigrations() {
       const settings = store.settings || [];
       const svEntry = settings.find((s) => s.key === 'schema_version');
       const currentVersion = svEntry ? String(svEntry.value) : '0';
       const toRun = Object.keys(DRIVE_MIGRATIONS).sort(compareVersions)
         .filter((v) => compareVersions(v, currentVersion) > 0);
+      // Demo context: there are no Drive files, so file operations are
+      // no-ops — but the token must be truthy, or migrations that guard
+      // on it (2.0.9, 2.9.17) return early before their store-side work.
+      // 2.9.17 prefers the store when a restore reseeded it, so with an
+      // empty file map its Wardrobe migration runs on the store rows.
+      const demoCtx = {
+        getToken: async () => 'demo',
+        filesByName: new Map(),
+        downloadFile: async () => ({ data: [] }),
+        deleteFile: async () => {},
+        fileMeta: {},
+      };
       let ran = 0;
       for (const version of toRun) {
         try {
-          await DRIVE_MIGRATIONS[version](store, {});
+          await DRIVE_MIGRATIONS[version](store, demoCtx);
         } catch (e) {
-          console.warn(`[DeLaClaw] demo migration ${version} failed:`, e.message);
-          break;
+          // A failed migration must not strand the later ones (notably
+          // 2.32.190): log it and continue. Only a migration that ran
+          // bumps the version, so a retry re-runs the failed one — and
+          // a retry always starts from a clean reseed of the backup.
+          console.warn(`[DeLaClaw] demo migration ${version} failed, continuing:`, e.message);
+          continue;
         }
         const entry = (store.settings || []).find((s) => s.key === 'schema_version');
         if (entry) entry.value = version;

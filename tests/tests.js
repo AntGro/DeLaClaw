@@ -1596,6 +1596,61 @@ test('Projects removal: migration 2.32.190 edge cases (second run, global-only, 
   db.close();
 });
 
+test('demo adapter: restoring a pre-2.0.9 backup runs the full migration chain', async () => {
+  const { createDemoAdapter } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'js', 'adapters', 'demo.js')).href);
+  const { DRIVE_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+  const { compareVersions } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'version-compare.js')).href);
+  // A backup from before the first Drive-context migration: every table
+  // the store would carry, with vestiaire + projects rows to migrate.
+  const seed = {};
+  for (const t of ['projects', 'tasks', 'todos', 'habits', 'habit_completions',
+    'flashcards', 'flashcard_notes', 'texts', 'text_line_progress',
+    'birthdays', 'events', 'lists', 'list_items',
+    'settings', 'prompts', 'daily_visits',
+    'todo_categories', 'habit_categories', 'flashcard_decks',
+    'gcal_sync', 'agent_grants', 'groups',
+    'vestiaire', 'vestiaire_categories', 'nvidia_usage']) seed[t] = [];
+  seed.vestiaire_categories = [
+    { id: 'c1', name: 'Jackets', shortname: null, color: null, sort_order: 0, is_protected: 0, owner_id: null, created_at: '2026-01-01', updated_at: '2026-01-02' },
+  ];
+  seed.vestiaire = [
+    { id: 'v1', name: 'Coat', category_id: 'c1', brand: 'Acne', size: 'M', color: 'Black', purchase_status: 'achete', note: null, sort_order: 0, owner_id: null, created_at: '2026-01-01', updated_at: '2026-01-02' },
+  ];
+  seed.nvidia_usage = [{ id: 'n1' }];
+  seed.projects = [
+    { id: 'p1', name: 'Alpha', shortname: null, color: null, tech: null, links: '[]', sort_order: 0, owner_id: null, created_at: '2026-01-01', updated_at: '2026-01-02' },
+  ];
+  seed.tasks = [
+    { id: 't1', project: 'p1', text: 'Do thing', status: 'todo', plan_note: null, hatch_response: null, context: null, sort_order: 0, owner_id: null },
+  ];
+  seed.prompts = [{ key: 'global', text: 'Pickup prompt' }];
+  seed.settings = [{ key: 'schema_version', value: '2.0.8' }];
+  const adapter = createDemoAdapter(seed);
+  const ran = await adapter.runPendingMigrations();
+  const expected = Object.keys(DRIVE_MIGRATIONS).filter((v) => compareVersions(v, '2.0.8') > 0).length;
+  assert(ran === expected,
+    `every migration after 2.0.8 must run in demo restores, not stop at a Drive-context one (ran ${ran} of ${expected})`);
+  const store = adapter._store;
+  const byId = (rows) => Object.fromEntries(rows.map((r) => [r.id, r]));
+  const lists = byId(store.lists);
+  const items = byId(store.list_items);
+  assert(!('nvidia_usage' in store), '2.0.9 must drop its tables in demo restores');
+  assert(lists.vest_wardrobe && lists.vest_wardrobe.name === 'Wardrobe',
+    '2.9.17 must build the Wardrobe section in demo restores, not stop at its Drive context');
+  assert(items.vest_v1 && items.vest_v1.list_id === 'vest_c1'
+    && items.vest_v1.note === 'Brand / Make: Acne\nSize: M\nColor: Black\nStatus: Purchased',
+    'wardrobe items must move into their category lists with the folded note');
+  assert(lists.mig_projects && items.mig_prompt_global,
+    '2.32.190 must run after the older Drive-context migrations');
+  assert(!('projects' in store) && !('vestiaire' in store),
+    'the source tables must be deleted by their migrations');
+  assert(store.settings.find((s) => s.key === 'schema_version').value === '2.32.190',
+    'schema_version must end at the latest migration');
+});
+
 test('Chunk scores: editing a chunk clears its score history with the rest of the revision state', () => {
   const fc = jsFiles['flashcards.js'];
   const saveAt = fc.indexOf('window.saveEditChunk');

@@ -640,7 +640,18 @@ input,select,button{font-family:inherit;}
 .project-link:hover{color:var(--accent);}
 
 /* ===== TASK LIST ===== */
-.task-list{padding:10px 16px 4px;flex:1;min-height:50px;max-height:var(--task-list-max-height, 400px);overflow-y:auto;transition:max-height 0.3s ease;display:flex;flex-direction:column;gap:4px;}
+.task-list{padding:10px 16px 4px;flex:1;min-height:50px;max-height:var(--task-list-max-height, 400px);overflow-y:auto;transition:max-height 0.3s ease,box-shadow 0.2s ease;display:flex;flex-direction:column;gap:4px;}
+
+/* Scroll-edge shadows (v2.32.185): an inset shadow at the edge of a
+   scrollable list signals more content in that direction. The classes
+   are set by updateScrollEdgeShadows() in item-utils.js — one delegated
+   scroll listener plus a re-apply after each re-render. */
+.scrollable--more-above{box-shadow:inset 0 12px 10px -6px rgba(0,0,0,0.28);}
+.scrollable--more-below{box-shadow:inset 0 -12px 10px -6px rgba(0,0,0,0.28);}
+.scrollable--more-above.scrollable--more-below{box-shadow:inset 0 12px 10px -6px rgba(0,0,0,0.28),inset 0 -12px 10px -6px rgba(0,0,0,0.28);}
+[data-theme="light"] .scrollable--more-above{box-shadow:inset 0 12px 10px -6px rgba(0,0,0,0.14);}
+[data-theme="light"] .scrollable--more-below{box-shadow:inset 0 -12px 10px -6px rgba(0,0,0,0.14);}
+[data-theme="light"] .scrollable--more-above.scrollable--more-below{box-shadow:inset 0 12px 10px -6px rgba(0,0,0,0.14),inset 0 -12px 10px -6px rgba(0,0,0,0.14);}
 .task-item{border-left:3px solid transparent;}
 .task-item.task-status-todo{border-left-color:var(--muted);}
 .task-item.task-status-in-progress{border-left-color:var(--blue);}
@@ -1861,7 +1872,7 @@ html.touch .tr-progress-bar.tr-bar-expanded .tr-seg { flex:0 0 28px; height:28px
 #welcome-bucket-todos > .welcome-section-header,#welcome-bucket-habits > .welcome-section-header{margin-bottom:0;}
 .welcome-section-header svg{flex-shrink:0;}
 
-.welcome-items{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow-y:auto;}
+.welcome-items{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow-y:auto;transition:box-shadow 0.2s ease;}
 .welcome-item{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:6px;cursor:pointer;transition:background 0.15s;}
 .welcome-item:hover{background:var(--accent-dim);}
 .welcome-item-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -2175,7 +2186,7 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
    and day cells have overflow:hidden (automatic minimum size 0), so a
    plain grid would compress the rows below content height instead of
    overflowing. max-content rows stay full-height, so the strip scrolls. */
-.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;}
+.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;transition:box-shadow 0.2s ease;}
 .welcome-cal-month-ctx{font-size:0.78rem;color:var(--muted);font-weight:500;margin-left:auto;}
 .welcome-section[style*="--cat-color"] > .welcome-section-header .welcome-cal-month-ctx{color:#fff;font-weight:500;text-shadow:0 0 2px rgba(0,0,0,0.15);}
 .welcome-cal-nav{margin-left:auto;display:inline-flex;gap:4px;align-items:center;flex-shrink:0;}
@@ -2588,6 +2599,7 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
   max-height: 60vh;
   overflow-y: auto;
   margin: 8px 0 4px;
+  transition: box-shadow 0.2s ease;
 }
 .cal-group-label {
   font-size: 0.72rem;

@@ -539,7 +539,7 @@ test('style.css shows Welcome strip titles on phones (not dots-only)', () => {
 // content-sized: a definite-height grid would otherwise compress them
 // (day cells have overflow:hidden, so their automatic minimum is 0).
 test('style.css lets the Welcome strip scroll inside its section', () => {
-  assert(styleCss.includes('.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;}'),
+  assert(styleCss.includes('.welcome-calendar-strip{flex:1;min-height:0;overflow-y:auto;grid-auto-rows:max-content;transition:box-shadow 0.2s ease;}'),
     'Missing Welcome strip scroll rule');
 });
 
@@ -5864,6 +5864,30 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // so one tick snapped all lists to a single scroll position.
       assert(fn[1].includes('bucketKey(el)'), 'scrollContainerKey must key by the container\'s own identity (bucketKey)');
       assert(fn[1].indexOf('bucketKey(el)') < fn[1].indexOf("closest('[id]')"), 'the container\'s own id must win over the shared ancestor id');
+    });
+
+    test('scroll-edge shadows: inset cue while a list has more above/below', () => {
+      const iu = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(iu.includes('export function updateScrollEdgeShadows(') && iu.includes('export function refreshScrollEdgeShadows(') && iu.includes('export function initScrollEdgeShadows('),
+        'scroll-edge helpers must exist in item-utils.js');
+      // One delegated capture-phase scroll listener, not per-element ones
+      // (elements are recreated on every re-render).
+      assert(iu.includes("window.addEventListener('scroll'") && iu.includes("t.matches(SCROLL_EDGE_SELECTOR)"),
+        'scroll-edge updates must come from one delegated capture-phase listener');
+      // Re-renders must re-apply the classes: every list render goes
+      // through the shared restore, including first renders (empty map).
+      assert(iu.includes('refreshScrollEdgeShadows(gridEl)') && iu.slice(iu.indexOf('export function restoreInnerScrollPositions')).includes('refreshScrollEdgeShadows(gridEl)'),
+        'restoreInnerScrollPositions must re-apply scroll-edge shadows');
+      assert(iu.includes('.welcome-calendar-strip'), 'the shadow selector must also cover .welcome-calendar-strip');
+      const css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
+      assert(css.includes('.scrollable--more-above{box-shadow:inset 0 12px') && css.includes('.scrollable--more-below{box-shadow:inset 0 -12px'),
+        'scroll-edge shadows must be inset box-shadows at the top/bottom edge');
+      assert(css.includes('[data-theme="light"] .scrollable--more-above'),
+        'scroll-edge shadows must have a light-theme value');
+      assert(css.includes('transition:max-height 0.3s ease,box-shadow 0.2s ease'),
+        '.task-list must transition box-shadow so the edge cue fades, not snaps');
+      const main = fs.readFileSync(path.join(JS_DIR, 'main.js'), 'utf-8');
+      assert(main.includes('initScrollEdgeShadows()'), 'boot must install the scroll-edge listener');
     });
 
     test('calendar grid: chips sort Birthday > Events > TODOs > Habits', () => {

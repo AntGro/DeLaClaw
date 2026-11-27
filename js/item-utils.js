@@ -837,11 +837,53 @@ export function captureInnerScrollPositions(gridEl) {
 }
 
 export function restoreInnerScrollPositions(gridEl, map) {
-  if (!gridEl || !map.size) return;
-  gridEl.querySelectorAll(SCROLLABLE_LIST_SELECTOR).forEach(el => {
-    const key = scrollContainerKey(el);
-    if (key && map.has(key)) el.scrollTop = map.get(key);
-  });
+  if (!gridEl) return;
+  if (map?.size) {
+    gridEl.querySelectorAll(SCROLLABLE_LIST_SELECTOR).forEach(el => {
+      const key = scrollContainerKey(el);
+      if (key && map.has(key)) el.scrollTop = map.get(key);
+    });
+  }
+  // Rebuilt elements lose their scroll-edge shadow classes; re-apply them
+  // here — every list render goes through this restore, including first
+  // renders (empty map) where positions have nothing to restore.
+  refreshScrollEdgeShadows(gridEl);
+}
+
+
+// ===================================================================
+// SCROLL-EDGE SHADOWS — more content above / below
+// ===================================================================
+// An inset shadow at the edge of a scrollable list signals that the
+// list continues in that direction. Two classes on the scroller itself
+// (CSS in style.css); the shadow is inset so it stays pinned to the
+// edge while the content scrolls under it. One delegated capture-phase
+// scroll listener updates the classes on scroll; refreshScrollEdgeShadows
+// re-applies them after a re-render recreates the elements.
+
+const SCROLL_EDGE_SELECTOR = SCROLLABLE_LIST_SELECTOR + ', .welcome-calendar-strip';
+
+export function updateScrollEdgeShadows(el) {
+  if (!el || !(el instanceof Element)) return;
+  const canScroll = el.scrollHeight > el.clientHeight + 1;
+  el.classList.toggle('scrollable--more-above', canScroll && el.scrollTop > 0);
+  el.classList.toggle('scrollable--more-below', canScroll && el.scrollTop + el.clientHeight < el.scrollHeight - 1);
+}
+
+export function refreshScrollEdgeShadows(rootEl) {
+  if (!rootEl) return;
+  rootEl.querySelectorAll(SCROLL_EDGE_SELECTOR).forEach(updateScrollEdgeShadows);
+}
+
+let _scrollEdgeInit = false;
+export function initScrollEdgeShadows() {
+  if (_scrollEdgeInit) return;
+  _scrollEdgeInit = true;
+  window.addEventListener('scroll', (e) => {
+    const t = e.target;
+    if (t instanceof Element && t.matches(SCROLL_EDGE_SELECTOR)) updateScrollEdgeShadows(t);
+  }, true);
+  refreshScrollEdgeShadows(document);
 }
 
 

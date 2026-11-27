@@ -7,6 +7,9 @@
 // ===================================================================
 
 // CHECK constraints — mirrors SQLite schema constraints
+import { DRIVE_MIGRATIONS } from '../../migrations/drive-migrations.js';
+import { compareVersions } from '../../migrations/version-compare.js';
+
 const CHECK_CONSTRAINTS = {
   todos:          { priority: ['urgent', 'high', 'medium', 'low', 'normal'] },
   tasks:          { status: ['draft', 'todo', 'in-progress', 'review', 'approved', 'revision', 'idea', 'idea-shipped', 'idea-plan-requested'] },
@@ -53,6 +56,35 @@ export function createDemoAdapter(initialData) {
     },
     /** Re-seed all in-memory data (for demo toggle) */
     reseed(data) { seed(data); },
+    /** Run pending Drive migrations against the in-memory store (used by
+        backup restore when the backup's schema is behind the app). Like
+        the Local runner, a failing migration stops the batch — nothing
+        persists in demo mode, so a failed run leaves the store as-is
+        until the next reseed. */
+    async runPendingMigrations() {
+      const settings = store.settings || [];
+      const svEntry = settings.find((s) => s.key === 'schema_version');
+      const currentVersion = svEntry ? String(svEntry.value) : '0';
+      const toRun = Object.keys(DRIVE_MIGRATIONS).sort(compareVersions)
+        .filter((v) => compareVersions(v, currentVersion) > 0);
+      let ran = 0;
+      for (const version of toRun) {
+        try {
+          await DRIVE_MIGRATIONS[version](store, {});
+        } catch (e) {
+          console.warn(`[DeLaClaw] demo migration ${version} failed:`, e.message);
+          break;
+        }
+        const entry = (store.settings || []).find((s) => s.key === 'schema_version');
+        if (entry) entry.value = version;
+        else {
+          if (!store.settings) store.settings = [];
+          store.settings.push({ key: 'schema_version', value: version });
+        }
+        ran++;
+      }
+      return ran;
+    },
     /** Return a reference to the raw store (for debugging) */
     get _store() { return store; },
   };

@@ -15,6 +15,10 @@ import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStat
 import { initScrollEdgeShadows } from './item-utils.js';
 
 const SETTINGS_PANES = ['general', 'calendar', 'data', 'stats', 'agents', 'account'];
+// Every tab the app can show. Boot, switchView and refreshCurrentView all
+// consult this list so a stale saved view (e.g. a removed tab) falls back
+// to Welcome instead of showing a blank page.
+const VALID_VIEWS = ['welcome', 'todos', 'habits', 'calendar', 'flashcards', 'lists', 'groups'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
 import { refreshHabits, renderHabits, initHabitModals, syncSharedHabits } from './habits.js';
 import { refreshBirthdays, initBirthdayModals } from './birthdays.js';
@@ -1257,7 +1261,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
 
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
-  const validViews = ['welcome', 'todos', 'habits', 'calendar', 'flashcards', 'lists', 'groups'];
+  const validViews = VALID_VIEWS;
   const rawHash = location.hash.replace('#', '');
   const isSettingsHash = location.hash === '#settings' || location.hash.startsWith('#settings/');
   const hashView = validViews.includes(rawHash) ? rawHash : null;
@@ -3407,6 +3411,9 @@ window.confirmPasteBackup = confirmPasteBackup;
 // currentView is in state
 
 function switchView(view, skipHash) {
+  // Unknown views (a stale saved view from a removed tab, a stale hash)
+  // fall back to Welcome instead of showing a blank page.
+  if (!VALID_VIEWS.includes(view)) view = 'welcome';
   // Re-clicking the current tab scrolls to the top (after the re-render
   // below, since Habits/Memory restore the page scroll position while
   // rendering — scrolling first would be undone).
@@ -3587,6 +3594,18 @@ const _viewRefreshMap = {
   flashcards: () => refreshFlashcards().then(() => markLastUpdated()),
   lists:      () => refreshLists().then(() => { renderLists(); markLastUpdated(); }),
 };
+
+// Refresh whatever view is showing (auth recovery, stale-tab return).
+// An unknown current view falls back to Welcome's refresher; a known view
+// with no refresher (groups, calendar — their renders read fresh state)
+// is a no-op. A stale saved view (e.g. a removed tab) must never leave a
+// refresh unhandled.
+function refreshCurrentView() {
+  const view = VALID_VIEWS.includes(state.currentView) ? state.currentView : 'welcome';
+  const fn = _viewRefreshMap[view];
+  if (!fn) return Promise.resolve();
+  return fn().catch(() => {});
+}
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !state.db?.connected) return;

@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-27T02:59:00.802Z from 49 modules (v2.32.190). Total LOC 40365. Do not hand-edit.
+> Generated 2026-11-27T18:53:41.468Z from 49 modules (v2.32.191). Total LOC 40416. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -25,7 +25,7 @@
 
 | Module | LOC | Tables | Depends | Dependents | Risks |
 |--------|-----|--------|---------|------------|-------|
-| main | 4125 | daily_visits,settings,todos | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:12,guard+pendingSet,window:8 |
+| main | 4144 | daily_visits,settings,todos | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:12,guard+pendingSet,window:8 |
 | sharing-drive | 2729 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
 | i18n | 2528 | - |  | agents-ui.js,birthdays.js,calendar-sync.js,calendar.js | pendingSet |
 | drive | 2042 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
@@ -43,7 +43,7 @@
 | hero | 448 | - | logo | main.js | - |
 | offline-cache | 439 | - | ./i18n,./state,i18n.js,state.js | drive.js,main.js,sharing.js | - |
 | scene-parse | 403 | text_line_progress,texts |  | flashcards.js | - |
-| demo | 310 | x |  | drive.js | - |
+| demo | 342 | x | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | drive.js | - |
 | logo | 257 | - |  | flashcards.js,hero.js,main.js | - |
 | frequency-rule | 231 | - | calendar-pure | habit-import.js,habits.js | - |
 | icons | 218 | - |  | agents-ui.js,batch-import.js,birthdays.js,calendar-sync.js | - |

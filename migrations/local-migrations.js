@@ -728,6 +728,15 @@ export const LOCAL_MIGRATIONS = {
     for (const p of prompts) if (p.key) promptByKey.set(p.key, p.text);
     const globalPrompt = promptByKey.get('global');
     const hasGlobalPrompt = typeof globalPrompt === 'string' && globalPrompt.trim() !== '';
+    // Orphaned prompts — keyed by neither a project id nor a project name
+    // (and not 'global') — have no list of their own; they go in the '*'
+    // list with the global prompt. The per-project lookup tries the id
+    // first, then the name (an early version keyed prompts by name).
+    const projectIds = new Set(projects.map((p) => p.id));
+    const projectNames = new Set(projects.map((p) => p.name));
+    const orphanPrompts = prompts.filter((p) => p.key && p.key !== 'global'
+      && !projectIds.has(p.key) && !projectNames.has(p.key)
+      && typeof p.text === 'string' && p.text.trim() !== '');
     const buildTaskNote = (t) => {
       const lines = [];
       if (t.status && t.status !== 'todo' && t.status !== 'approved' && t.status !== 'idea-shipped') lines.push(`Status: ${t.status}`);
@@ -735,6 +744,15 @@ export const LOCAL_MIGRATIONS = {
       if (t.hatch_response) lines.push(`Claw: ${t.hatch_response}`);
       if (t.context) lines.push(`Context: ${t.context}`);
       return lines.length ? lines.join('\n') : null;
+    };
+    // Markdown links: renderMd's link pattern stops a label at the first
+    // ']' and a URL at the first ')', so strip brackets from labels and
+    // percent-encode ')' in URLs (the old rendering used real <a> tags and
+    // never mangled these).
+    const mdLink = (label, url) => {
+      const safeLabel = String(label).replace(/[\[\]]/g, '');
+      const safeUrl = String(url).replace(/\)/g, '%29');
+      return `[${safeLabel}](${safeUrl})`;
     };
     const buildProjectInfoNote = (p) => {
       const lines = [];
@@ -744,7 +762,7 @@ export const LOCAL_MIGRATIONS = {
       else if (Array.isArray(p.links)) links = p.links;
       for (const l of links) {
         if (!l || !l.url) continue;
-        lines.push(`[${l.label || l.url}](${l.url})`);
+        lines.push(mdLink(l.label || l.url, l.url));
       }
       return lines.length ? lines.join('\n') : null;
     };
@@ -752,7 +770,11 @@ export const LOCAL_MIGRATIONS = {
     const insertList = db.prepare('INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, kind, parent_id, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const insertItem = db.prepare('INSERT INTO list_items (id, list_id, text, checked, note, attachments, sort_order, shared_id, shared_group_id, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const existing = db.prepare("SELECT COUNT(*) AS n FROM lists WHERE id = 'mig_projects'").get().n;
-    if (!existing && (projects.length || hasGlobalPrompt)) {
+    // Only delete the sources when this run actually copied something: a
+    // second run (or a restore that already holds the migrated lists) must
+    // not wipe rows the copy skipped.
+    const didCopy = !existing && (projects.length || hasGlobalPrompt || orphanPrompts.length > 0);
+    if (didCopy) {
       const usedColors = new Set(db.prepare('SELECT color FROM lists').all().map((l) => l.color).filter(Boolean));
       const listCount = db.prepare('SELECT COUNT(*) AS n FROM lists').get().n;
       const sectionColor = DEFAULT_CATEGORY_PALETTE.find((c) => !usedColors.has(c))
@@ -762,9 +784,17 @@ export const LOCAL_MIGRATIONS = {
       if (hasArchived) {
         insertList.run('mig_projects_archived', 'Archived', null, sectionColor, null, 9999, 0, 'section', 'mig_projects', null, now, now);
       }
-      if (hasGlobalPrompt) {
+      if (hasGlobalPrompt || orphanPrompts.length > 0) {
         insertList.run('mig_projects_star', '*', null, sectionColor, null, 0, 0, 'bucket', 'mig_projects', null, now, now);
-        insertItem.run('mig_prompt_global', 'mig_projects_star', globalPrompt, 0, null, null, 0, null, null, null, now, now);
+        let starOrder = 0;
+        if (hasGlobalPrompt) {
+          insertItem.run('mig_prompt_global', 'mig_projects_star', globalPrompt, 0, null, null, starOrder++,
+            null, null, null, now, now);
+        }
+        for (const op of orphanPrompts) {
+          insertItem.run(`mig_prompt_${op.key}`, 'mig_projects_star', op.text, 0, `Prompt key: ${op.key}`, null,
+            starOrder++, null, null, null, now, now);
+        }
       }
       const tasksByProject = new Map();
       for (const t of tasks) {
@@ -775,8 +805,14 @@ export const LOCAL_MIGRATIONS = {
         const listId = `mig_${p.id}`;
         insertList.run(listId, p.name, p.shortname ?? null, p.color ?? null, null, p.sort_order ?? 0, 0, 'bucket',
           archivedIds.has(p.id) ? 'mig_projects_archived' : 'mig_projects', p.owner_id ?? null, p.created_at, p.updated_at);
-        let topOrder = -2;
-        const promptText = promptByKey.get(p.id);
+        const projectTasks = (tasksByProject.get(p.id) || []).slice()
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        // Tasks were added at min(sort_order) - 1, so their orders run
+        // negative in any project that was never dragged: offset the top
+        // items from the project's actual minimum so they stay on top.
+        const base = Math.min(0, ...projectTasks.map((t) => t.sort_order ?? 0));
+        let topOrder = base - 2;
+        const promptText = promptByKey.get(p.id) ?? promptByKey.get(p.name);
         if (typeof promptText === 'string' && promptText.trim() !== '') {
           insertItem.run(`mig_prompt_${p.id}`, listId, promptText, 0, null, null, topOrder++,
             null, null, p.owner_id ?? null, p.created_at, p.updated_at);
@@ -786,8 +822,6 @@ export const LOCAL_MIGRATIONS = {
           insertItem.run(`mig_info_${p.id}`, listId, 'Project info', 0, infoNote, null, topOrder++,
             null, null, p.owner_id ?? null, p.created_at, p.updated_at);
         }
-        const projectTasks = (tasksByProject.get(p.id) || []).slice()
-          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
         for (const t of projectTasks) {
           insertItem.run(`mig_${t.id}`, listId, t.text,
             (t.status === 'approved' || t.status === 'idea-shipped') ? 1 : 0,
@@ -796,9 +830,14 @@ export const LOCAL_MIGRATIONS = {
         }
       }
     }
-    db.prepare('DELETE FROM tasks').run();
-    db.prepare('DELETE FROM projects').run();
-    if (hasTable('prompts')) db.prepare('DELETE FROM prompts').run();
-    db.prepare("DELETE FROM settings WHERE key IN ('archived_project_ids', 'show_archived')").run();
+    // No dead data — but only when this run copied something (see didCopy
+    // above). The DELETEs are guarded like the reads: a missing table must
+    // not fail a migration the reads tolerate.
+    if (didCopy) {
+      if (hasTable('tasks')) db.prepare('DELETE FROM tasks').run();
+      if (hasTable('projects')) db.prepare('DELETE FROM projects').run();
+      if (hasTable('prompts')) db.prepare('DELETE FROM prompts').run();
+      if (hasTable('settings')) db.prepare("DELETE FROM settings WHERE key IN ('archived_project_ids', 'show_archived')").run();
+    }
   },
 };

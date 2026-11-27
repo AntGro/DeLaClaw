@@ -579,6 +579,15 @@ export const DRIVE_MIGRATIONS = {
     for (const p of prompts) if (p.key) promptByKey.set(p.key, p.text);
     const globalPrompt = promptByKey.get('global');
     const hasGlobalPrompt = typeof globalPrompt === 'string' && globalPrompt.trim() !== '';
+    // Orphaned prompts — keyed by neither a project id nor a project name
+    // (and not 'global') — have no list of their own; they go in the '*'
+    // list with the global prompt. The per-project lookup tries the id
+    // first, then the name (an early version keyed prompts by name).
+    const projectIds = new Set(projects.map((p) => p.id));
+    const projectNames = new Set(projects.map((p) => p.name));
+    const orphanPrompts = prompts.filter((p) => p.key && p.key !== 'global'
+      && !projectIds.has(p.key) && !projectNames.has(p.key)
+      && typeof p.text === 'string' && p.text.trim() !== '');
     const buildTaskNote = (t) => {
       const lines = [];
       if (t.status && t.status !== 'todo' && t.status !== 'approved' && t.status !== 'idea-shipped') lines.push(`Status: ${t.status}`);
@@ -587,13 +596,22 @@ export const DRIVE_MIGRATIONS = {
       if (t.context) lines.push(`Context: ${t.context}`);
       return lines.length ? lines.join('\n') : null;
     };
+    // Markdown links: renderMd's link pattern stops a label at the first
+    // ']' and a URL at the first ')', so strip brackets from labels and
+    // percent-encode ')' in URLs (the old rendering used real <a> tags and
+    // never mangled these).
+    const mdLink = (label, url) => {
+      const safeLabel = String(label).replace(/[\[\]]/g, '');
+      const safeUrl = String(url).replace(/\)/g, '%29');
+      return `[${safeLabel}](${safeUrl})`;
+    };
     const buildProjectInfoNote = (p) => {
       const lines = [];
       if (p.tech) lines.push(`Tech: ${p.tech}`);
       const links = typeof p.links === 'string' ? (() => { try { return JSON.parse(p.links); } catch { return []; } })() : (p.links || []);
       for (const l of (Array.isArray(links) ? links : [])) {
         if (!l || !l.url) continue;
-        lines.push(`[${l.label || l.url}](${l.url})`);
+        lines.push(mdLink(l.label || l.url, l.url));
       }
       return lines.length ? lines.join('\n') : null;
     };
@@ -601,7 +619,11 @@ export const DRIVE_MIGRATIONS = {
     store.lists = store.lists || [];
     store.list_items = store.list_items || [];
     const alreadyMigrated = store.lists.some((l) => l.id === 'mig_projects');
-    if (!alreadyMigrated && (projects.length || hasGlobalPrompt)) {
+    // Only delete the sources when this run actually copied something: a
+    // second run (or a restore that already holds the migrated lists) must
+    // not wipe rows the copy skipped.
+    const didCopy = !alreadyMigrated && (projects.length || hasGlobalPrompt || orphanPrompts.length > 0);
+    if (didCopy) {
       const usedColors = new Set(store.lists.map((l) => l.color).filter(Boolean));
       const sectionColor = DEFAULT_CATEGORY_PALETTE.find((c) => !usedColors.has(c))
         || DEFAULT_CATEGORY_PALETTE[store.lists.length % DEFAULT_CATEGORY_PALETTE.length];
@@ -620,18 +642,28 @@ export const DRIVE_MIGRATIONS = {
           owner_id: null, created_at: now, updated_at: now,
         });
       }
-      if (hasGlobalPrompt) {
+      if (hasGlobalPrompt || orphanPrompts.length > 0) {
         store.lists.push({
           id: 'mig_projects_star', name: '*',
           shortname: null, color: sectionColor, icon: null,
           sort_order: 0, archived: 0, kind: 'bucket', parent_id: 'mig_projects',
           owner_id: null, created_at: now, updated_at: now,
         });
-        store.list_items.push({
-          id: 'mig_prompt_global', list_id: 'mig_projects_star', text: globalPrompt, checked: 0,
-          note: null, sort_order: 0, shared_id: null, shared_group_id: null,
-          owner_id: null, created_at: now, updated_at: now,
-        });
+        let starOrder = 0;
+        if (hasGlobalPrompt) {
+          store.list_items.push({
+            id: 'mig_prompt_global', list_id: 'mig_projects_star', text: globalPrompt, checked: 0,
+            note: null, sort_order: starOrder++, shared_id: null, shared_group_id: null,
+            owner_id: null, created_at: now, updated_at: now,
+          });
+        }
+        for (const op of orphanPrompts) {
+          store.list_items.push({
+            id: `mig_prompt_${op.key}`, list_id: 'mig_projects_star', text: op.text, checked: 0,
+            note: `Prompt key: ${op.key}`, sort_order: starOrder++, shared_id: null, shared_group_id: null,
+            owner_id: null, created_at: now, updated_at: now,
+          });
+        }
       }
       const tasksByProject = new Map();
       for (const t of tasks) {
@@ -647,8 +679,14 @@ export const DRIVE_MIGRATIONS = {
           parent_id: archivedIds.has(p.id) ? 'mig_projects_archived' : 'mig_projects',
           owner_id: p.owner_id ?? null, created_at: p.created_at, updated_at: p.updated_at,
         });
-        let topOrder = -2;
-        const promptText = promptByKey.get(p.id);
+        const projectTasks = (tasksByProject.get(p.id) || []).slice()
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        // Tasks were added at min(sort_order) - 1, so their orders run
+        // negative in any project that was never dragged: offset the top
+        // items from the project's actual minimum so they stay on top.
+        const base = Math.min(0, ...projectTasks.map((t) => t.sort_order ?? 0));
+        let topOrder = base - 2;
+        const promptText = promptByKey.get(p.id) ?? promptByKey.get(p.name);
         if (typeof promptText === 'string' && promptText.trim() !== '') {
           store.list_items.push({
             id: `mig_prompt_${p.id}`, list_id: listId, text: promptText, checked: 0,
@@ -666,8 +704,6 @@ export const DRIVE_MIGRATIONS = {
             owner_id: p.owner_id ?? null, created_at: p.created_at, updated_at: p.updated_at,
           });
         }
-        const projectTasks = (tasksByProject.get(p.id) || []).slice()
-          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
         for (const t of projectTasks) {
           store.list_items.push({
             id: `mig_${t.id}`, list_id: listId, text: t.text,
@@ -681,15 +717,18 @@ export const DRIVE_MIGRATIONS = {
       // Tasks whose project is gone have no list to live in; like the
       // Wardrobe migration's unplaceable items, they are dropped.
     }
-    // No dead data: the source tables empty out (the runner flushes the
-    // changed tables, so the files land as []) and the project settings
-    // rows go with them.
-    delete store.projects;
-    delete store.tasks;
-    delete store.prompts;
-    for (const key of ['archived_project_ids', 'show_archived']) {
-      const i = settings.findIndex((s) => s.key === key);
-      if (i !== -1) settings.splice(i, 1);
+    // No dead data — but only when this run copied something (see didCopy
+    // above): the source tables empty out (the runner flushes the changed
+    // tables, so the files land as []) and the project settings rows go
+    // with them. A skipped copy leaves the sources untouched.
+    if (didCopy) {
+      delete store.projects;
+      delete store.tasks;
+      delete store.prompts;
+      for (const key of ['archived_project_ids', 'show_archived']) {
+        const i = settings.findIndex((s) => s.key === key);
+        if (i !== -1) settings.splice(i, 1);
+      }
     }
   },
 };

@@ -795,6 +795,14 @@ test('collapsed row actions stay display:grid so the reveal slides smoothly', ()
   }
 });
 
+// Card transition (v2.32.191): the 0.35s override was pruned with the
+// project-expand block in 2.32.190 — it is shared by every bucket card,
+// so it stays; the 0.25s base rule alone would change all card timing.
+test('project cards keep their 0.35s transition override', () => {
+  assert(styleCss.includes('.project-card{transition:all 0.35s cubic-bezier(0.4,0,0.2,1);}'),
+    'the .project-card 0.35s transition override must survive CSS prunes');
+});
+
 // Row-action columns (v2.32.189): Lists lay out 3-across like TODOs/Habits —
 // no per-list column class, so 5–6 buttons form 2 rows of 3.
 test('lists row actions use the shared 3-column layout, no cols-2', () => {
@@ -1454,12 +1462,9 @@ test('Projects removal: migration 2.32.190 moves projects/tasks/prompts into Lis
   const { LOCAL_MIGRATIONS } =
     await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
   const db = new Database(':memory:');
-  db.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, shortname TEXT, color TEXT, tech TEXT, links TEXT, sort_order INTEGER DEFAULT 0, owner_id TEXT, created_at TEXT, updated_at TEXT)`);
-  db.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, project TEXT, text TEXT NOT NULL, status TEXT, plan_note TEXT, hatch_response TEXT, context TEXT, sort_order INTEGER DEFAULT 0, owner_id TEXT, created_at TEXT, updated_at TEXT)`);
-  db.exec(`CREATE TABLE prompts (key TEXT PRIMARY KEY, text TEXT, owner_id TEXT, updated_at TEXT)`);
-  db.exec(`CREATE TABLE lists (id TEXT PRIMARY KEY, name TEXT NOT NULL, shortname TEXT, color TEXT, icon TEXT, sort_order INTEGER DEFAULT 0, archived INTEGER DEFAULT 0, kind TEXT DEFAULT 'bucket', parent_id TEXT, owner_id TEXT, created_at TEXT, updated_at TEXT)`);
-  db.exec(`CREATE TABLE list_items (id TEXT PRIMARY KEY, list_id TEXT REFERENCES lists(id) ON DELETE CASCADE, text TEXT NOT NULL, checked INTEGER DEFAULT 0, note TEXT, attachments TEXT, sort_order INTEGER DEFAULT 0, shared_id TEXT, shared_group_id TEXT, owner_id TEXT, created_at TEXT, updated_at TEXT)`);
-  db.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, owner_id TEXT, updated_at TEXT)`);
+  // The real schema, not a hand-built copy — a drifted fixture cannot hide
+  // a column the migration relies on (review of 47d80cd).
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf8'));
   db.exec(`INSERT INTO projects VALUES ('p1', 'Alpha', 'AL', '#ef4444', 'React', '[{"label":"GitHub","url":"https://github.com/x/y"}]', 0, 'u1', '2026-01-01', '2026-01-02')`);
   db.exec(`INSERT INTO projects VALUES ('p2', 'Beta', NULL, NULL, NULL, '[]', 1, 'u1', '2026-01-01', '2026-01-02')`);
   db.exec(`INSERT INTO tasks VALUES ('t1', 'p1', 'Do thing', 'review', 'The plan', 'Done it', NULL, 0, 'u1', '2026-01-01', '2026-01-02')`);
@@ -1493,6 +1498,101 @@ test('Projects removal: migration 2.32.190 moves projects/tasks/prompts into Lis
     'local migration must drop the project settings rows');
   assert(db.prepare("SELECT value FROM settings WHERE key = 'schema_version'").get().value === '2.32.189',
     'local migration must never touch schema_version itself');
+  db.close();
+});
+
+test('Projects removal: migration 2.32.190 edge cases (second run, global-only, orphans, malformed data)', async () => {
+  const { DRIVE_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+  const byId = (rows) => Object.fromEntries(rows.map((r) => [r.id, r]));
+  // A project whose tasks were only ever added (never dragged) has
+  // negative orders: the prompt/info items must still sit on top.
+  const store = {
+    projects: [
+      { id: 'p1', name: 'Gamma', shortname: null, color: null, tech: null, links: '[{"label":"A]B","url":"https://en.wikipedia.org/wiki/X_(y)"}]', sort_order: 0, owner_id: null, created_at: '2026-01-01', updated_at: '2026-01-02' },
+    ],
+    tasks: [
+      { id: 't1', project: 'p1', text: 'First added', status: 'todo', plan_note: null, hatch_response: null, context: null, sort_order: 0, owner_id: null },
+      { id: 't2', project: 'p1', text: 'Second added', status: 'todo', plan_note: null, hatch_response: null, context: null, sort_order: -2, owner_id: null },
+      { id: 't3', project: 'p1', text: 'Third added', status: 'todo', plan_note: null, hatch_response: null, context: null, sort_order: null, owner_id: null },
+    ],
+    prompts: [
+      { key: 'Gamma', text: 'Prompt keyed by name' },
+      { key: 'stale-key', text: 'Lost prompt' },
+    ],
+    lists: [],
+    list_items: [],
+    settings: [
+      { key: 'archived_project_ids', value: '[not json' },
+      { key: 'schema_version', value: '2.32.189' },
+    ],
+  };
+  await DRIVE_MIGRATIONS['2.32.190'](store);
+  const items = byId(store.list_items);
+  assert(items.mig_prompt_p1 && items.mig_prompt_p1.text === 'Prompt keyed by name',
+    'a prompt keyed by project name must still reach its project');
+  assert(items.mig_prompt_p1.sort_order === -4 && items.mig_info_p1.sort_order === -3,
+    'top items must offset from the project minimum order (-2), not from 0');
+  assert(items.mig_t3 && items.mig_t3.sort_order === 0,
+    'a null task sort_order must migrate as 0');
+  assert(items.mig_info_p1.note === '[AB](https://en.wikipedia.org/wiki/X_(y%29)',
+    'a ] in a link label and a ) in a URL must not break the markdown link');
+  assert(!store.lists.some((l) => l.id === 'mig_projects_archived'),
+    'a malformed archived_project_ids value must not create an Archived subsection');
+  assert(items['mig_prompt_stale-key'] && items['mig_prompt_stale-key'].list_id === 'mig_projects_star'
+    && items['mig_prompt_stale-key'].note === 'Prompt key: stale-key',
+    'an orphan prompt must land in the * list with its key in the note');
+  // Second run: a no-op that drops nothing.
+  const listsBefore = store.lists.length;
+  const itemsBefore = store.list_items.length;
+  await DRIVE_MIGRATIONS['2.32.190'](store);
+  assert(store.lists.length === listsBefore && store.list_items.length === itemsBefore,
+    'a second run must not duplicate the migrated rows');
+  // Global prompt only, no projects at all.
+  const store2 = {
+    projects: [], tasks: [], lists: [], list_items: [],
+    prompts: [{ key: 'global', text: 'Pickup only' }],
+    settings: [{ key: 'schema_version', value: '2.32.189' }],
+  };
+  await DRIVE_MIGRATIONS['2.32.190'](store2);
+  const lists2 = byId(store2.lists);
+  const items2 = byId(store2.list_items);
+  assert(lists2.mig_projects && lists2.mig_projects_star && items2.mig_prompt_global,
+    'a global prompt alone must still build the section and the * list');
+  assert(!store2.lists.some((l) => l.id.startsWith('mig_') && l.id !== 'mig_projects' && l.id !== 'mig_projects_star'),
+    'no project lists may appear when there are no projects');
+  // Local backend: the same edge fixture, against the real schema.
+  let Database;
+  try {
+    ({ Database } = await import('bun:sqlite'));
+  } catch {
+    console.log('  (skip: bun:sqlite unavailable for the local half of the 2.32.190 edge cases)');
+    return;
+  }
+  const { LOCAL_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+  const db = new Database(':memory:');
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf8'));
+  db.exec(`INSERT INTO projects VALUES ('p1', 'Gamma', NULL, NULL, NULL, '[{"label":"A]B","url":"https://en.wikipedia.org/wiki/X_(y)"}]', 0, NULL, '2026-01-01', '2026-01-02')`);
+  db.exec(`INSERT INTO tasks VALUES ('t1', 'p1', 'First added', 'todo', NULL, NULL, NULL, 0, NULL, '2026-01-01', '2026-01-02')`);
+  db.exec(`INSERT INTO tasks VALUES ('t2', 'p1', 'Second added', 'todo', NULL, NULL, NULL, -2, NULL, '2026-01-01', '2026-01-02')`);
+  db.exec(`INSERT INTO tasks VALUES ('t3', 'p1', 'Third added', 'todo', NULL, NULL, NULL, NULL, NULL, '2026-01-01', '2026-01-02')`);
+  db.exec(`INSERT INTO prompts VALUES ('Gamma', 'Prompt keyed by name', NULL, '2026-01-02')`);
+  db.exec(`INSERT INTO prompts VALUES ('stale-key', 'Lost prompt', NULL, '2026-01-02')`);
+  db.exec(`INSERT INTO settings VALUES ('archived_project_ids', '[not json', NULL, '2026-01-02')`);
+  db.exec(`INSERT INTO settings VALUES ('schema_version', '2.32.189', NULL, '2026-01-02')`);
+  LOCAL_MIGRATIONS['2.32.190'](db);
+  const lrows = byId(db.prepare('SELECT * FROM list_items').all());
+  assert(lrows.mig_prompt_p1 && lrows.mig_prompt_p1.sort_order === -4
+    && lrows.mig_info_p1 && lrows.mig_info_p1.sort_order === -3
+    && lrows.mig_info_p1.note === '[AB](https://en.wikipedia.org/wiki/X_(y%29)',
+    'local migration must offset the top items and escape the link the same way');
+  assert(lrows['mig_prompt_stale-key'] && lrows['mig_prompt_stale-key'].list_id === 'mig_projects_star',
+    'local migration must place the orphan prompt in the * list');
+  const itemsBeforeLocal = db.prepare('SELECT COUNT(*) AS n FROM list_items').get().n;
+  LOCAL_MIGRATIONS['2.32.190'](db);
+  assert(db.prepare('SELECT COUNT(*) AS n FROM list_items').get().n === itemsBeforeLocal,
+    'local second run must not duplicate rows');
   db.close();
 });
 
@@ -8697,6 +8797,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         assert(delegationSrc.includes(`'${studyAction}': 1`),
           `study action ${studyAction} must be allowed in read-only mode (sessions run, ratings don't persist)`);
       }
+    });
+
+    test('main: refreshCurrentView exists and unknown views fall back to Welcome', () => {
+      assert(mainSrc.includes('function refreshCurrentView()'),
+        'refreshCurrentView must be defined — the auth-recovery handler calls it (it was missing in 2.32.190)');
+      assert(mainSrc.includes('refreshCurrentView();'),
+        'the auth-recovery handler must call refreshCurrentView, not the removed refreshAll');
+      assert(!mainSrc.includes('refreshAll'),
+        'no refreshAll reference may remain: it lived in the deleted projects.js');
+      assert(mainSrc.includes("if (!VALID_VIEWS.includes(view)) view = 'welcome';"),
+        'switchView must default an unknown view to Welcome, or a stale saved view shows a blank page');
     });
 
     const flashcardsSrc = fs.readFileSync(path.join(JS_DIR, 'flashcards.js'), 'utf-8');

@@ -245,13 +245,13 @@ The agent interacts with DeLaClaw via the Google Drive API, reading and writing 
 
 ### Current capabilities
 
-- **Task pickup:** the Heartbeat fetches `status=todo` and `status=revision` tasks from the agent task queue, works on them, sets `status=review` with `hatch_response`.
+- **Task pickup (dormant):** the Heartbeat used to fetch `status=todo` and `status=revision` tasks from the agent task queue, work on them, and set `status=review` with `hatch_response`. The `tasks` table was removed with the Projects tab in v2.32.190, so the queue cannot be refilled; the pickup is paused until the workflow is revived in a more general form.
 - **Flashcard proposals:** Heartbeat fetches `proposal_status=pending` drafts, generates Q/A pairs, sets `proposal_status=ready`.
 - **Habit `next_due`:** Heartbeat computes `next_due` for free-text frequency rules.
 
 ### Conflict handling
 
-- **Per-table granularity** — the agent reads/writes only the table it needs (e.g., `tasks.json`), without touching others.
+- **Per-table granularity** — the agent reads/writes only the table it needs (e.g., `lists.json`), without touching others.
 - **ETag-based conflict resolution** — writes include an `If-Match` header. If the app flushed the same table since the agent's read, the write fails with 412 and the agent re-reads, merges (newer `updated_at` wins per record), and retries.
 - **Polling for changes** — the app polls Drive every 30s and re-fetches tables whose `modifiedTime` changed, so agent edits show up without a full reload.
 

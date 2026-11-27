@@ -2,7 +2,7 @@ import { lucideIcon } from './icons.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, applySectionGrid, fetchAll, backfillCategoryColors, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration, orderKeyOf, compareOrderKeys } from './sections-pure.js';
-import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, bulkSortOrder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditText, initNavBtnReorder, bulkSortOrder, snapshotBuckets, animateBucketsFromSnapshot, snapshotRows, animateRowsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { pendingSharedNextDue as _pendingSharedNextDue } from './pending-next-due.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
@@ -2121,6 +2121,11 @@ async function markHabitDoneNow(habitId, btnEl) {
   if (_pendingHabitDones.has(habitId)) return;
   _pendingHabitDones.add(habitId);
 
+  // FLIP: snapshot row positions before the save — the refresh rebuilds
+  // the grid, so the rank change glides from these positions.
+  const habitGrid = document.getElementById('habitCategoryGrid');
+  const rowSnapshot = snapshotRows(habitGrid, '.habit-item', 'data-habit-id');
+
   // Disable all matching buttons (safety across views)
   const sel = `button.habit-done-btn[data-habit-id="${CSS && CSS.escape ? CSS.escape(habitId) : habitId.replace(/"/g, '\\"')}"]`;
   const allBtns = document.querySelectorAll(sel);
@@ -2193,6 +2198,8 @@ async function markHabitDoneNow(habitId, btnEl) {
     await refreshHabits();
   } finally {
     _pendingHabitDones.delete(habitId);
+    // The refresh above rebuilt the grid; glide moved rows to their new ranks.
+    animateRowsFromSnapshot(habitGrid, '.habit-item', 'data-habit-id', rowSnapshot);
     // Re-enable in case refresh didn't recreate buttons (e.g. on error)
     toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving', 'is-pending'); b.removeAttribute('aria-busy'); });
   }

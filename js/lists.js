@@ -2,7 +2,7 @@ import { lucideIcon } from './icons.js';
 import state, { LIST_NOTE_MAX_LEN, MAX_META_DISPLAY } from './state.js';
 import { esc, escQ, renderMd, showToast, showConfirmAction, balanceGrid, applySectionGrid, truncateWithShowMore, fetchAll, nextPaletteColor, onColorFor, autoResizeTextarea, snapshotTextInputs, restoreTextInputs } from './utils.js';
 import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTree, pathLabelOf, descendantsOf, descendantBucketIds, siblingNameTaken, planNodeMove, runBucketToSectionMigration } from './sections-pure.js';
-import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
+import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, snapshotRows, animateRowsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
 
@@ -1079,6 +1079,11 @@ async function toggleListItemCheck(id, btnEl) {
   if (_pendingListItemToggles.has(id)) return;
   _pendingListItemToggles.add(id);
 
+  // FLIP: snapshot row positions before the save — the render rebuilds
+  // the grid, so the rank change glides from these positions.
+  const listsGrid = document.getElementById('listsGrid');
+  const rowSnapshot = snapshotRows(listsGrid, '.list-item', 'data-item-id');
+
   const safeId = CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\"');
   const allBtns = document.querySelectorAll(`button[data-action="toggle-list-item-check"][data-id="${safeId}"]`);
   const targetBtn = btnEl instanceof HTMLElement ? btnEl : (allBtns[0] || null);
@@ -1119,6 +1124,8 @@ async function toggleListItemCheck(id, btnEl) {
     renderLists();
   } finally {
     _pendingListItemToggles.delete(id);
+    // The render above rebuilt the grid; glide moved rows to their new ranks.
+    animateRowsFromSnapshot(listsGrid, '.list-item', 'data-item-id', rowSnapshot);
     toToggle.forEach(b => { b.disabled = false; b.classList.remove('saving', 'is-pending'); b.removeAttribute('aria-busy'); });
   }
 }

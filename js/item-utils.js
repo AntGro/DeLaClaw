@@ -1591,3 +1591,59 @@ export function animateBucketsFromSnapshot(container, snapshot, durationMs = 600
     });
   });
 }
+
+// ===================================================================
+// ROW FLIP — rank changes inside a list (habit Done, list tick)
+// ===================================================================
+// The re-render rebuilds the rows, so a CSS transition alone cannot
+// move them. Mirrors snapshotBuckets / animateBucketsFromSnapshot, but
+// rows only move vertically and only animate when both positions are
+// on screen (a row whose new rank is below the fold just appears
+// there, as before).
+export function snapshotRows(container, rowSelector, keyAttr) {
+  const map = new Map();
+  if (!container) return map;
+  container.querySelectorAll(rowSelector).forEach(el => {
+    const key = el.getAttribute(keyAttr);
+    if (key) map.set(key, el.getBoundingClientRect());
+  });
+  return map;
+}
+
+export function animateRowsFromSnapshot(container, rowSelector, keyAttr, snapshot, durationMs = 250) {
+  if (!container || !snapshot.size) return;
+  if (container.offsetParent === null) return; // hidden tab — nothing visible to move
+  container.querySelectorAll(rowSelector).forEach(el => {
+    const key = el.getAttribute(keyAttr);
+    const oldRect = key && snapshot.get(key);
+    if (!oldRect) return;
+    const newRect = el.getBoundingClientRect();
+    const dy = oldRect.top - newRect.top;
+    if (Math.abs(dy) < 1) return;
+    if (!rowMoveVisible(oldRect, newRect, el)) return;
+    el.style.transition = 'none';
+    el.style.transform = `translateY(${dy}px)`;
+    // eslint-disable-next-line no-unused-expressions
+    el.offsetHeight; // force reflow before enabling transition
+    el.style.transition = `transform ${durationMs}ms ease-out`;
+    el.style.transform = '';
+    el.addEventListener('transitionend', function handler(e) {
+      if (e.propertyName !== 'transform') return;
+      el.style.transition = '';
+      el.removeEventListener('transitionend', handler);
+    });
+  });
+}
+
+// A row move animates only when its old and new spots are both on
+// screen — inside the window viewport and, when the row lives in an
+// inner scroll container, inside that container's visible area.
+function rowMoveVisible(oldRect, newRect, el) {
+  const inWindow = r => r.top >= 0 && r.bottom <= window.innerHeight;
+  if (!inWindow(oldRect) || !inWindow(newRect)) return false;
+  const scroller = el.closest('.task-list, .todo-cat-list');
+  if (!scroller) return true;
+  const box = scroller.getBoundingClientRect();
+  const inBox = r => r.top >= box.top && r.bottom <= box.bottom;
+  return inBox(oldRect) && inBox(newRect);
+}

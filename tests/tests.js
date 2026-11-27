@@ -10853,6 +10853,26 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    test('rank changes FLIP-animate rows: habit Done and list tick', () => {
+      // Marking a habit done / ticking a list item re-sorts the row, and
+      // the render rebuilds the rows — so the move must be FLIP-animated
+      // from a snapshot taken before the save (see item-utils.js).
+      const itemUtils = fs.readFileSync(path.join(JS_DIR, 'item-utils.js'), 'utf-8');
+      assert(itemUtils.includes('export function snapshotRows(') && itemUtils.includes('export function animateRowsFromSnapshot('),
+        'row FLIP helpers must exist in item-utils.js');
+      for (const [name, src, fn, grid, row, key] of [
+        ['habits.js', fs.readFileSync(path.join(JS_DIR, 'habits.js'), 'utf-8'), 'markHabitDoneNow', 'habitCategoryGrid', '.habit-item', 'data-habit-id'],
+        ['lists.js', fs.readFileSync(path.join(JS_DIR, 'lists.js'), 'utf-8'), 'toggleListItemCheck', 'listsGrid', '.list-item', 'data-item-id'],
+      ]) {
+        const start = src.indexOf(`async function ${fn}(`);
+        const fnSlice = src.slice(start, start + 9000);
+        assert(fnSlice.includes('snapshotRows(') && fnSlice.includes('animateRowsFromSnapshot('),
+          `${name} ${fn} must snapshot rows before the save and animate after the re-render`);
+        assert(fnSlice.includes(grid) && fnSlice.includes(`'${row}'`) && fnSlice.includes(`'${key}'`),
+          `${name} ${fn} must FLIP the ${row} rows of #${grid} keyed by ${key}`);
+      }
+    });
+
     test('sections: chips rows always render — collapsed for ≤1 child, revealed during chip drags', () => {
       // A single child has nothing to navigate between and nothing to
       // reorder, so its row is collapsed in normal rendering — but it

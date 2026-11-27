@@ -8,7 +8,7 @@
     return target.closest ? target.closest('[data-action]') : null;
   }
   function getId(el) {
-    return el.dataset.id || el.dataset.todoId || el.dataset.habitId || el.dataset.projectId || el.dataset.taskId || el.dataset.listId || el.dataset.vestId || el.dataset.deck || el.dataset.groupId || el.dataset.itemId || el.dataset.folderId || '';
+    return el.dataset.id || el.dataset.todoId || el.dataset.habitId || el.dataset.listId || el.dataset.vestId || el.dataset.deck || el.dataset.groupId || el.dataset.itemId || el.dataset.folderId || '';
   }
   function getCat(el) {
     return el.dataset.category || el.dataset.cat || '';
@@ -45,15 +45,15 @@
     if (window.notifyReadOnly) window.notifyReadOnly();
   }
   var READ_ONLY_ALLOWED = {
-    'switch-view': 1, 'set-project-filter': 1, 'set-todo-filter': 1, 'set-habit-filter': 1,
-    'set-flashcard-filter': 1, 'sort-projects': 1, 'sort-todos': 1, 'sort-habits': 1,
-    'sort-flashcards': 1, 'sort-lists': 1, 'toggle-archived': 1, 'toggle-search': 1,
+    'switch-view': 1, 'set-todo-filter': 1, 'set-habit-filter': 1,
+    'set-flashcard-filter': 1, 'sort-todos': 1, 'sort-habits': 1,
+    'sort-flashcards': 1, 'sort-lists': 1, 'toggle-search': 1,
     'clear-search': 1, 'switch-settings-pane': 1, 'toggle-theme': 1, 'export-backup': 1, 'copy-backup': 1,
     'navigate-to-category': 1, 'toggle-done-todos': 1, 'navigate-to-habit-category': 1,
     'navigate-to-todo-section': 1, 'navigate-to-habit-section': 1, 'navigate-to-list-section': 1,
     'toggle-section-chips': 1,
-    'navigate-to-flash-deck': 1, 'navigate-to-flash-section': 1, 'open-habit-history': 1, 'navigate-to-project': 1,
-    'toggle-expand-project': 1, 'copy-project-title': 1, 'copy-item-link': 1,
+    'navigate-to-flash-deck': 1, 'navigate-to-flash-section': 1, 'open-habit-history': 1,
+    'copy-item-link': 1,
     'show-todo-general-card': 1, 'calendar-prev': 1, 'calendar-next': 1, 'calendar-today': 1,
     'welcome-cal-nav': 1, 'welcome-cal-today': 1,
     'toggle-calendar-filter': 1, 'open-welcome-birthday': 1, 'set-calendar-view': 1,
@@ -76,8 +76,6 @@
     'open-chunk-panel': 1, 'show-chunk-stats': 1, 'back-to-chunk-panel': 1, 'toggle-chunk-bar': 1, 'revise-chunk': 1
   };
   function readOnlyAllows(action) {
-    // 'close-and-open-revision' mutates (task status) despite its prefix.
-    if (action === 'close-and-open-revision') return false;
     if (action.indexOf('close-') === 0) return true; // closing a modal/view is always safe
     return !!READ_ONLY_ALLOWED[action];
   }
@@ -103,19 +101,14 @@
     if (isReadOnly() && !readOnlyAllows(action)) { notifyReadOnly(); return; }
     switch (action) {
       case 'switch-view': if (el.dataset.view) callWindow('switchView', [el.dataset.view]); break;
-      case 'set-project-filter': callWindow('setProjectFilter', [el.dataset.filter]); break;
       case 'set-todo-filter': callWindow('setTodoFilter', [el.dataset.filter]); break;
       case 'set-habit-filter': callWindow('setHabitFilter', [el.dataset.filter]); break;
       case 'set-flashcard-filter': callWindow('setFlashcardFilter', [el.dataset.filter]); break;
-      case 'sort-projects': callWindow('renderProjectGrid', []); break;
       case 'sort-todos': callWindow('renderTodos', []); break;
       case 'sort-habits': callWindow('renderHabits', []); break;
       case 'sort-flashcards': callWindow('renderFlashcards', []); break;
       case 'sort-lists': callWindow('renderLists', []); break;
       case 'handle-model-change': callWindow('handleModelChange', []); break;
-      case 'open-prompt-editor': callWindow('openPromptEditor', []); break;
-      case 'toggle-archived': callWindow('toggleShowArchived', []); break;
-      case 'open-add-project': callWindow('openAddProjectModal', []); break;
       case 'open-add-category': callWindow('openAddCategoryModal', []); break;
       case 'open-add-habit': callWindow('openAddHabitModal', []); break;
       case 'share-habit-from-add': callWindow('shareHabitFromAdd', [el]); break;
@@ -134,16 +127,6 @@
       case 'start-text-practice': callWindow('startTextPractice', [el.dataset.deck || el.dataset.scope || '__all', el]); break;
       case 'toggle-search': callWindow('toggleSearch', [el]); break;
       case 'clear-search': callWindow('clearPageSearch', [el]); break;
-      case 'close-add-project': callWindow('closeAddProjectModal', []); break;
-      case 'save-new-project': callWindow('saveNewProject', []); break;
-      case 'close-revision': callWindow('closeRevisionModal', []); break;
-      case 'submit-revision': callWindow('submitRevision', []); break;
-      case 'close-prompt-editor': callWindow('closePromptEditor', []); break;
-      case 'save-global-prompt': callWindow('saveGlobalPrompt', []); break;
-      case 'close-project-prompt': callWindow('closeProjectPrompt', []); break;
-      case 'save-project-prompt': callWindow('saveProjectPrompt', []); break;
-      case 'close-edit-project': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditProjectModal', []); break;
-      case 'save-edit-project': callWindow('saveEditProject', []); break;
       case 'close-edit-category': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditCategoryModal', []); break;
       case 'save-edit-category': callWindow('saveEditCategory', []); break;
       case 'close-confirm-action': callWindow('closeConfirmAction', []); break;
@@ -292,25 +275,7 @@
       case 'revise-from-chunk': callWindow('reviseFromChunk', [el.dataset.textId, parseInt(el.dataset.chunkIndex || '0', 10)]); break;
       case 'continue-text-same-text': callWindow('continueTextSameText', []); break;
       case 'continue-free-practice': callWindow('continueFreePractice', []); break;
-      case 'archive-project': callWindow('archiveProject', [getId(el)]); break;
-      case 'unarchive-project': callWindow('unarchiveProject', [getId(el)]); break;
-      case 'delete-project': callWindow('deleteProject', [getId(el)]); break;
-      case 'copy-project-title': callWindow('copyProjectTitle', [getId(el)]); break;
       case 'copy-item-link': callWindow('copyItemLink', [el.dataset.linkType, getId(el), el]); break;
-      case 'navigate-to-project': callWindow('navigateToProject', [getId(el)]); break;
-      case 'toggle-expand-project': callWindow('toggleExpandProject', [getId(el)]); break;
-      case 'open-edit-project': callWindow('openEditProjectModal', [getId(el)]); break;
-      case 'close-task-expand': callWindow('closeTaskExpandModal', []); break;
-      case 'open-project-prompt': callWindow('openProjectPrompt', [getId(el)]); break;
-      case 'add-task': callWindow('addTask', [getId(el)]); break;
-      case 'update-task-status': callWindow('updateTaskStatus', [getId(el)||el.dataset.taskId, el.dataset.status, el]); break;
-      case 'open-revision-modal': callWindow('openRevisionModal', [el.dataset.taskId||getId(el)]); break;
-      case 'prompt-edit-task': { var tid = getId(el)||el.dataset.taskId; var st = el.dataset.status; callWindow('promptEditTask', [tid, st, el]); } break;
-      case 'delete-task': callWindow('deleteTask', [getId(el)||el.dataset.taskId]); break;
-      case 'toggle-archived-tasks': callWindow('toggleArchivedTasks', []); break;
-      case 'delete-all-archived-tasks': callWindow('deleteAllArchivedTasks', []); break;
-      case 'approve-task-and-close': { var atId = el.dataset.taskId||getId(el); var atSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(atId, atSt, el); callWindow('closeRevisionModal', []); } break;
-      case 'close-and-open-revision': { var coId = el.dataset.taskId||getId(el); var coSt = el.dataset.status; if (window.updateTaskStatus) window.updateTaskStatus(coId, coSt, el); callWindow('closeRevisionModal', []); if (window.openRevisionModal) setTimeout(function(){ window.openRevisionModal(coId); }, 120); } break;
       case 'open-add-birthday': callWindow('closeCalendarAddMenu', []); callWindow('openAddBirthdayModal', [el.dataset.date]); break;
       case 'handle-avatar-click': callWindow('handleAvatarClick', [getId(el)]); break;
       case 'calendar-prev': callWindow('calendarNav', [-1]); break;
@@ -463,9 +428,8 @@
     var action = el.dataset.action;
     if (!action) return;
     // Read-only: only re-render sorts and calendar day picking are view-only.
-    if (isReadOnly() && ['sort-projects', 'sort-todos', 'sort-habits', 'sort-flashcards', 'sort-lists', 'pick-calendar-day'].indexOf(action) === -1) return;
+    if (isReadOnly() && ['sort-todos', 'sort-habits', 'sort-flashcards', 'sort-lists', 'pick-calendar-day'].indexOf(action) === -1) return;
     switch (action) {
-      case 'sort-projects': callWindow('renderProjectGrid', []); break;
       case 'sort-todos': callWindow('renderTodos', []); break;
       case 'sort-habits': callWindow('renderHabits', []); break;
       case 'sort-flashcards': callWindow('renderFlashcards', []); break;
@@ -485,13 +449,12 @@
     if (!el) return;
     var action = el.dataset.action;
     if (!action) return;
-    // Debounce search inputs 150ms — filterProjects/Todos iterate full DOM on every keystroke
+    // Debounce search inputs 150ms — filterTodos iterates the full DOM on every keystroke
     if (action.indexOf('filter-') === 0) {
       var isClear = e.target.value === '';
       if (isClear) {
         clearTimeout(_searchTimers[action]);
         switch (action) {
-          case 'filter-projects': callWindow('filterProjects', [e]); break;
           case 'filter-todos': callWindow('filterTodos', [e]); break;
           case 'filter-habits': callWindow('filterHabits', [e]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [e]); break;
@@ -507,7 +470,6 @@
         // Use latest value at timeout
         var fakeEvt = { target: target };
         switch (action) {
-          case 'filter-projects': callWindow('filterProjects', [fakeEvt]); break;
           case 'filter-todos': callWindow('filterTodos', [fakeEvt]); break;
           case 'filter-habits': callWindow('filterHabits', [fakeEvt]); break;
           case 'filter-flashcards': callWindow('filterFlashcards', [fakeEvt]); break;
@@ -534,7 +496,7 @@
     if (!action) return;
     // Read-only: every keydown-handled action is an add/save flow.
     if (isReadOnly()) {
-      if (action.slice(-9) === '-on-enter' || ['add-todo-to-category', 'add-habit-from-input', 'handle-draft-input', 'task-input', 'quick-add-input', 'quick-add-list-item'].indexOf(action) !== -1) notifyReadOnly();
+      if (action.slice(-9) === '-on-enter' || ['add-todo-to-category', 'add-habit-from-input', 'handle-draft-input', 'quick-add-input', 'quick-add-list-item'].indexOf(action) !== -1) notifyReadOnly();
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -555,16 +517,12 @@
         case 'add-todo-to-category': if (e.shiftKey) { setTimeout(function(){ if (window.autoResizeTextarea) window.autoResizeTextarea(el); }, 0); } else { e.preventDefault(); if (window.addTodoToCategory) window.addTodoToCategory(el); } break;
         case 'add-habit-from-input': if (e.shiftKey) { setTimeout(function(){ if (window.autoResizeTextarea) window.autoResizeTextarea(el); }, 0); } else { e.preventDefault(); if (window.addHabitFromInput) window.addHabitFromInput(el); } break;
         case 'handle-draft-input': e.preventDefault(); if (window.quickAddDraft) window.quickAddDraft(); break;
-        case 'task-input': e.preventDefault(); { var pid = el.dataset.id; if (pid && window.addTask) window.addTask(pid); else if (window.handleTaskInput) window.handleTaskInput(e); } break;
         case 'quick-add-input': if (e.shiftKey) { setTimeout(function(){ if (window.autoResizeTextarea) window.autoResizeTextarea(el); }, 0); } else { e.preventDefault(); var lid = el.dataset.listId||el.dataset.id; if (lid && window.quickAddListItem) window.quickAddListItem(lid); } break;
         case 'welcome-quick-add-todo-on-enter': e.preventDefault(); if (window.addTodoToCategory) window.addTodoToCategory(el); break;
         case 'welcome-quick-add-habit-on-enter': e.preventDefault(); if (window.addHabitFromInput) window.addHabitFromInput(el); break;
         case 'quick-add-list-item': e.preventDefault(); { var qlid = el.dataset.listId||el.dataset.id; if (qlid && window.quickAddListItem) window.quickAddListItem(qlid); } break;
         default: break;
       }
-    }
-    if (action === 'task-input' && e.key === 'Enter') {
-      if (window.handleTaskInput) window.handleTaskInput(e);
     }
   }
   document.addEventListener('click', handleClick, false);

@@ -13,8 +13,6 @@ import { initCalSync, enableCalSync, disableCalSync, getCalSyncPrefs, reconcileA
 
 import { esc, showToast, showConfirmAction, closeConfirmAction, updateFooterStats, renderFooterIdentity, updateTaskListMaxHeight, isEditing, fetchAll, isInstalledPWA, deviceClass, isTouchDevice, isMobileUA, parseDeepLink, highlightItem, DEEP_LINK_TYPE_MAP, swipeDirection } from './utils.js';
 import { initScrollEdgeShadows } from './item-utils.js';
-import { loadProjects, buildProjectCards, initProjectDragDrop, updateArchiveToggleBtn,
-         renderArchivedProjects, refreshAll, renderAllTasks, loadPrompts, initProjectModals } from './projects.js';
 
 const SETTINGS_PANES = ['general', 'calendar', 'data', 'stats', 'agents', 'account'];
 import { refreshTodos, renderTodos, getTodoCounts, initTodoModals, syncSharedTodos } from './todos.js';
@@ -729,11 +727,9 @@ document.addEventListener('DOMContentLoaded', () => {
     'saveNewHabitCategory', 'saveEditHabitCategory',
     'promoteHabit',
     'saveNewList', 'saveEditList',
-    'addTask', 'saveNewProject', 'saveEditProject', 'submitRevision',
     'saveNewCategory', 'saveEditCategory', 'snoozeFor', 'submitSnooze', 'habitSnoozeFor', 'submitHabitSnooze', 'addTodoToCategory',
     'executeConfirmAction', 'confirmPasteBackup',
     'quickAddDraft', 'quickAddListItem',
-    'saveGlobalPrompt', 'saveProjectPrompt',
   ];
   for (const name of guardedNames) {
     if (typeof window[name] === 'function') window[name] = guard(window[name]);
@@ -1094,7 +1090,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
           if (state.readOnlyMode) {
             exitReadOnlyMode();
             adapter.pollNow?.();
-            refreshAll().catch(() => {});
+            refreshCurrentView();
           }
         } else {
           enterReadOnlyMode({ onSignIn: () => adapter.reauth() });
@@ -1105,9 +1101,9 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   } else if (mode === 'local') {
     adapter = createRestAdapter(url);
     // Test connection with raw adapter BEFORE wrapping with offline cache
-    const { error } = await adapter.from('projects').select('id').limit(1);
+    const { error } = await adapter.from('todos').select('id').limit(1);
     if (error) {
-      console.warn('[DeLaClaw] local projects check failed:', error);
+      console.warn('[DeLaClaw] local check failed:', error);
       const st = error.status || error.statusCode;
       const m = String(error.message || '').toLowerCase();
       const d = String(error.details || '').toLowerCase();
@@ -1235,13 +1231,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   }
 
 
-  await loadProjects();
-  buildProjectCards();
-  initProjectModals();
-  initProjectDragDrop();
-  updateArchiveToggleBtn();
-  renderArchivedProjects();
-
   // Load user settings from DB (before tab visibility / view restore)
   await loadSettings();
 
@@ -1268,7 +1257,7 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
 
   // Restore view early (before async refreshes) to avoid flash
   applyTabVisibility();
-  const validViews = ['welcome', 'projects', 'todos', 'habits', 'calendar', 'flashcards', 'lists', 'groups'];
+  const validViews = ['welcome', 'todos', 'habits', 'calendar', 'flashcards', 'lists', 'groups'];
   const rawHash = location.hash.replace('#', '');
   const isSettingsHash = location.hash === '#settings' || location.hash.startsWith('#settings/');
   const hashView = validViews.includes(rawHash) ? rawHash : null;
@@ -1309,8 +1298,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
     if (h !== state.currentView) switchView(h);
   });
 
-  await refreshAll();
-
   // Calendar sync auto-enable: if Calendar scope was granted at sign-in
   // and the user has never had calendar sync set (key absent), enable it.
   // Once the key exists (true or false), the user's choice is respected.
@@ -1345,8 +1332,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   }
   if (mode !== 'demo' && mode !== 'googledrive') {
     state.db.channel('tasks-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, debouncedHandler(() => { if (!isEditing()) refreshAll().then(() => markLastUpdated()); }))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'prompts' }, debouncedHandler(() => loadPrompts()))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, debouncedHandler(() => { if (!isEditing()) refreshTodos().then(() => markLastUpdated()); }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'habits' }, debouncedHandler(() => refreshHabits().then(() => markLastUpdated())))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'habit_completions' }, debouncedHandler(() => refreshHabits().then(() => markLastUpdated())))
@@ -1392,9 +1377,6 @@ async function connect(url, key, mode = 'googledrive', skipDemoChooser = false, 
   // Drive: wire poll-based change detection to the same refresh functions
   if (mode === 'googledrive' && state.driveAdapter) {
     const driveRefreshMap = {
-      tasks: () => refreshAll(),
-      projects: async () => { await loadProjects(); buildProjectCards(); initProjectDragDrop(); await refreshAll(); },
-      prompts: () => loadPrompts(),
       todos: () => refreshTodos(),
       habits: () => refreshHabits(),
       habit_completions: () => refreshHabits(),
@@ -1607,12 +1589,6 @@ function initDemoBanner() {
       toggleBtn.textContent = t('demo.show_empty');
     }
     showingData = !showingData;
-    await loadProjects();
-    buildProjectCards();
-    initProjectDragDrop();
-    updateArchiveToggleBtn();
-    renderArchivedProjects();
-    await refreshAll();
     await refreshTodos();
     await refreshHabits();
     await refreshBirthdays();
@@ -1832,12 +1808,6 @@ async function onLangSwitchDemo(lang) {
   const data = getDemoData(lang);
   state.demoAdapter.reseed(data);
   setDemoCategoriesFromData(data);
-  await loadProjects();
-  buildProjectCards();
-  initProjectDragDrop();
-  updateArchiveToggleBtn();
-  renderArchivedProjects();
-  await refreshAll();
   await refreshTodos();
   await refreshHabits();
   await refreshBirthdays();
@@ -1944,7 +1914,6 @@ function updateMenuThemeItem() {
 function reRenderCurrentView() {
   const view = state.currentView;
   if (view === 'welcome') renderWelcome();
-  else if (view === 'projects') refreshAll();
   else if (view === 'todos') renderTodos();
   else if (view === 'habits') renderHabits();
   else if (view === 'calendar') renderCalendar();
@@ -1955,7 +1924,7 @@ function reRenderCurrentView() {
 
 function updateStaticLabels() {
   // Nav tabs
-  const tabLabels = { tabWelcome: 'nav.today', tabProjects: 'nav.projects', tabTodos: 'nav.todos', tabHabits: 'nav.habits',
+  const tabLabels = { tabWelcome: 'nav.today', tabTodos: 'nav.todos', tabHabits: 'nav.habits',
     tabCalendar: 'nav.calendar', tabFlashcards: 'nav.flashcards', tabLists: 'nav.lists', tabGroups: 'nav.groups' };
   for (const [id, key] of Object.entries(tabLabels)) {
     const el = document.getElementById(id);
@@ -1973,7 +1942,6 @@ function updateStaticLabels() {
   if (stayLabel) stayLabel.textContent = t('login.stay_connected');
   // Search inputs
   const searchMap = {
-    'projectsView': 'common.search',
     'todosView': 'common.search',
     'habitsView': 'common.search',
     'flashcardsView': 'flashcards.search_placeholder',
@@ -2015,13 +1983,6 @@ function updateStaticLabels() {
     habitSort.options[0].text = t('habits.sort_due');
     habitSort.options[1].text = t('habits.sort_name');
     habitSort.options[2].text = t('habits.sort_last_done');
-  }
-  // Project sort
-  const projectSort = document.getElementById('projectSortBy');
-  if (projectSort) {
-    projectSort.options[0].text = t('projects.sort_manual');
-    projectSort.options[1].text = t('projects.sort_name');
-    projectSort.options[2].text = t('projects.sort_tasks');
   }
   // Lists sort
   const listsSort = document.getElementById('listsSortBy');
@@ -2372,7 +2333,6 @@ function toggleTheme() {
 // ===================================================================
 const ALL_TABS = [
   { key: 'welcome', tabId: 'tabWelcome', icon: 'home', color: '#3b82f6', labelKey: 'nav.today' },
-  { key: 'projects', tabId: 'tabProjects', icon: 'layout-grid', color: '#6366f1', labelKey: 'nav.projects' },
   { key: 'todos', tabId: 'tabTodos', icon: 'list-checks', color: '#22c55e', labelKey: 'nav.todos' },
   { key: 'habits', tabId: 'tabHabits', icon: 'repeat', color: '#ec4899', labelKey: 'nav.habits' },
   { key: 'calendar', tabId: 'tabCalendar', icon: 'calendar', color: '#f97316', labelKey: 'nav.calendar' },
@@ -2599,7 +2559,7 @@ function toggleTabConfigItem(key) {
 
 // ── AI Settings ──
 
-// Fire-and-forget upsert to settings table (used by tab config + project archive)
+// Fire-and-forget upsert to settings table (used by tab config)
 function _persistSetting(key, value) {
   if (!state.db?.connected) return;
   state.db.from('settings').upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' }).then(({ error }) => {
@@ -2616,8 +2576,6 @@ async function loadSettings() {
         if (row.key === 'schema_version') state.dbSchemaVersion = row.value || '0.00';
         if (row.key === 'tab_visibility') { try { state.tabVisibility = JSON.parse(row.value); } catch { /* keep null */ } }
         if (row.key === 'tab_order') { try { state.tabOrder = JSON.parse(row.value); } catch { /* keep null */ } }
-        if (row.key === 'archived_project_ids') { try { state.archivedProjectIds = JSON.parse(row.value) || []; } catch { /* keep [] */ } }
-        if (row.key === 'show_archived') state.showArchived = row.value === 'true';
       }
     }
   } catch (e) { console.warn('Could not load settings:', e.message); }
@@ -2937,11 +2895,11 @@ const BACKUP_TABLES = [
   // category / deck parents first (items FK into these)
   'todo_categories', 'habit_categories', 'flashcard_decks',
   // parent tables
-  'projects', 'habits', 'texts', 'lists',
+  'habits', 'texts', 'lists',
   // child / independent tables
-  'todos', 'tasks', 'habit_completions', 'flashcards', 'flashcard_notes',
+  'todos', 'habit_completions', 'flashcards', 'flashcard_notes',
   'text_line_progress', 'birthdays', 'events', 'list_items',
-  'settings', 'prompts', 'daily_visits',
+  'settings', 'daily_visits',
   // sharing: owned groups (creator side) — FK order: groups → members → items
   'sharing_groups', 'sharing_members', 'sharing_items',
   // sharing: joined groups (joiner side) + created-group name records
@@ -3369,12 +3327,6 @@ async function performImportFromText(text) {
           );
         }
       }
-      await loadProjects();
-      buildProjectCards();
-      initProjectDragDrop();
-      updateArchiveToggleBtn();
-      renderArchivedProjects();
-      await refreshAll();
       await refreshTodos();
       await refreshHabits();
       await refreshBirthdays();
@@ -3450,7 +3402,7 @@ window.confirmPasteBackup = confirmPasteBackup;
 
 
 // ===================================================================
-// VIEW SWITCHER (Projects / TODOs / Habits)
+// VIEW SWITCHER
 // ===================================================================
 // currentView is in state
 
@@ -3477,7 +3429,6 @@ function switchView(view, skipHash) {
     if (location.hash !== newHash) history.replaceState(null, '', newHash);
   }
   const welcomeView = document.getElementById('welcomeView');
-  const projectsView = document.getElementById('projectsView');
   const todosView = document.getElementById('todosView');
   const habitsView = document.getElementById('habitsView');
   const calendarView = document.getElementById('calendarView');
@@ -3485,7 +3436,6 @@ function switchView(view, skipHash) {
   const listsView = document.getElementById('listsView');
   const groupsView = document.getElementById('groupsView');
   const tabWelcome = document.getElementById('tabWelcome');
-  const tabProjects = document.getElementById('tabProjects');
   const tabTodos = document.getElementById('tabTodos');
   const tabHabits = document.getElementById('tabHabits');
   const tabCalendar = document.getElementById('tabCalendar');
@@ -3495,7 +3445,6 @@ function switchView(view, skipHash) {
 
   // Hide all
   if (welcomeView) welcomeView.style.display = 'none';
-  projectsView.style.display = 'none';
   todosView.style.display = 'none';
   if (habitsView) habitsView.style.display = 'none';
   if (calendarView) calendarView.style.display = 'none';
@@ -3503,7 +3452,6 @@ function switchView(view, skipHash) {
   if (listsView) listsView.style.display = 'none';
   if (groupsView) groupsView.style.display = 'none';
   if (tabWelcome) tabWelcome.classList.remove('active');
-  tabProjects.classList.remove('active');
   tabTodos.classList.remove('active');
   if (tabHabits) tabHabits.classList.remove('active');
   if (tabCalendar) tabCalendar.classList.remove('active');
@@ -3516,10 +3464,6 @@ function switchView(view, skipHash) {
     if (tabWelcome) tabWelcome.classList.add('active');
     // Welcome aggregates its own stats (weekly completions, etc.) — refresh needed
     refreshWelcome().then(() => { renderWelcome(); markLastUpdated(); });
-  } else if (view === 'projects') {
-    projectsView.style.display = '';
-    tabProjects.classList.add('active');
-    renderAllTasks();
   } else if (view === 'todos') {
     todosView.style.display = '';
     tabTodos.classList.add('active');
@@ -3568,10 +3512,6 @@ function updateViewFooterStats() {
   const viewCountsMap = {
     welcome: () => [
       `${icon('home')} ${t('nav.today')}`,
-    ],
-    projects: () => [
-      `${icon('folder')} Projects: ${state.PROJECTS.length}`,
-      `${icon('list-checks')} Tasks: ${state.allTasks.length}`,
     ],
     todos: () => {
       const c = getTodoCounts();
@@ -3641,7 +3581,6 @@ const STALE_TAB_MS = 2 * 60 * 1000; // 2 minutes
 
 const _viewRefreshMap = {
   welcome:    () => refreshWelcome().then(() => { renderWelcome(); markLastUpdated(); }),
-  projects:   () => refreshAll().then(() => markLastUpdated()),
   todos:      () => refreshTodos().then(() => { renderTodos(); markLastUpdated(); }),
   habits:     () => refreshHabits().then(() => { renderHabits(); markLastUpdated(); }),
   birthdays:  () => refreshBirthdays().then(() => { renderBirthdays(); markLastUpdated(); }),
@@ -3791,8 +3730,6 @@ function findItemElement(type, id) {
   const selectors = {
     todo: `[data-todo-id="${eid}"]`,
     habit: `[data-habit-id="${eid}"]`,
-    project: `[data-project="${eid}"]`,
-    task: `[data-task-id="${eid}"]`,
     birthday: `.birthday-card[data-id="${eid}"]`,
     vest: `[data-vest-id="${eid}"]`,
     flashcard: `[data-card-id="${eid}"]`,
@@ -3810,13 +3747,6 @@ function findItemElement(type, id) {
 }
 
 function expandParentIfNeeded(type, id, el) {
-  if (type === 'task') {
-    const archivedSection = el.closest('.archived-tasks');
-    if (archivedSection && archivedSection.style.display === 'none') {
-      const toggle = el.closest('.project-card')?.querySelector('.archive-toggle');
-      if (toggle) toggle.click();
-    }
-  }
   const bucket = el.closest('.bucket-collapsed');
   if (bucket) {
     const header = bucket.querySelector('.bucket-header, .project-card-header');

@@ -64,14 +64,12 @@ All shared state lives in `js/state.js` as a single exported `state` object:
 ```javascript
 const state = {
   db,                        // db.js abstraction
-  PROJECTS: [],              // project objects
-  allTasks: [],              // task objects
   allHabits: [],             // habit objects
   allHabitCompletions: [],   // habit completion records
   allBirthdays: [],          // birthday objects
   allLists: [],              // list objects
   allListItems: [],          // list item objects
-  currentView: 'projects',   // active tab
+  currentView: 'welcome',    // active tab
   offlineMode: false,         // true when serving cached data
   pausedMode: false,          // true when sync is paused
   dbSchemaVersion: '0.000',   // from settings table
@@ -79,8 +77,6 @@ const state = {
   authUser: null,             // authenticated user object
   tabVisibility: null,        // {key: bool} from settings DB
   tabOrder: null,             // [key, …] from settings DB
-  archivedProjectIds: [],     // [id, …] from settings DB
-  showArchived: false,        // bool from settings DB
   // ...
 };
 ```
@@ -95,8 +91,6 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema).
 
 | Table | Purpose | Key relationships |
 |---|---|---|
-| `projects` | Project metadata (name, color, links, sort order) | -- |
-| `tasks` | Tasks within projects | `project` -> `projects.id` |
 | `todos` | Standalone TODOs with priority and due dates | `category_id` -> `todo_categories.id` |
 | `todo_categories` | TODO category containers | -- |
 | `habits` | Habit definitions with scheduling rules | `category_id` -> `habit_categories.id` |
@@ -112,12 +106,13 @@ The canonical table list lives in `server/schema.sql` (SQLite base schema).
 | `lists` | Checklist containers | -- |
 | `list_items` | Items within lists | `list_id` -> `lists.id` |
 | `settings` | Key-value store (schema version, preferences) | -- |
-| `prompts` | AI prompt templates | -- |
 | `daily_visits` | Visit statistics (active days, streaks) | -- |
 | `groups` | Groups the user has joined (encrypted tokens) + name records for groups they created | -- |
 | `sharing_groups` | Shared group definitions | -- |
 | `sharing_members` | Group membership | `group_id` -> `sharing_groups.id` |
 | `sharing_items` | Shared items (TODOs, habits, list items) | `group_id` -> `sharing_groups.id` |
+
+Removed in v2.32.190: `projects`, `tasks` and `prompts` no longer hold data — the migration moved their contents into Lists and emptied them. They stay in `server/schema.sql` and `DRIVE_TABLES` only so the migration can flush them, and are dropped once every account has migrated.
 
 ### Category integrity
 
@@ -206,7 +201,6 @@ js/
   agents-ui.js             Settings > Agents pane
   delegation.js            Cross-module action delegation for shared items
   welcome.js               Today dashboard
-  projects.js              Project boards + task management
   todos.js                 TODO management
   habits.js                Habit tracking
   frequency-rule.js        Pure habit scheduling rules (next-due computation)
@@ -262,10 +256,10 @@ Language is stored in `localStorage` and can be changed in Settings. The `t()` f
 
 ## Drag-and-drop
 
-`js/item-utils.js` provides reusable drag-and-drop reordering via long-press (150ms threshold). Both category nav buttons and bucket items (TODOs, Projects, Lists, Flashcard drafts) share the same UX:
+`js/item-utils.js` provides reusable drag-and-drop reordering via long-press (150ms threshold). Both category nav buttons and bucket items (TODOs, Lists, Flashcard drafts) share the same UX:
 
 - **Activation**: long-press on touch/pointer (`LONG_PRESS_MS = 150`), not native HTML drag events
 - **Visual**: the real item follows the cursor/finger; a placeholder gap shows the drop position; siblings slide with FLIP animation. No visible drag handles — shadow-only to indicate float
-- **Cross-container**: TODOs, Projects, Habits, and Lists support dragging items between categories/lists — drop updates the FK and re-numbers `sort_order` in both source and target containers
+- **Cross-container**: TODOs, Habits, and Lists support dragging items between categories/lists — drop updates the FK and re-numbers `sort_order` in both source and target containers
 - **Persistence**: `sort_order` updates are batched into a single DB write
 - **Auto-scroll**: scrollable containers auto-scroll when dragging near edges

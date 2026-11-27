@@ -33,7 +33,7 @@ When a modal is open, Tab can move focus to elements behind the modal overlay. U
 ### 3. Icon-only buttons without accessible names
 
 Many action buttons contain only an SVG icon (via `lucideIcon()`) without a text label or `aria-label`. Examples:
-- "Add task" buttons in project cards: `<button data-action="add-task" data-id="...">${lucideIcon('plus', 16)}</button>`
+- "Add draft" buttons in the flashcard draft deck: `<button data-action="quick-add-draft">${lucideIcon('plus', 16)}</button>`
 - "Add todo" buttons in category cards
 - "Add habit" quick-add buttons
 - Various edit/delete action buttons in hover menus

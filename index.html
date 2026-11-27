@@ -45,7 +45,6 @@
   <!-- Panel 2: Features -->
   <div class="hero-panel hero-feat-panel" data-fade="0.30,0.38,0.58,0.66">
     <div class="hero-feat">
-      <span data-i18n="hero.projects">Projects</span>
       <span data-i18n="hero.todos">TODOs</span>
       <span data-i18n="hero.habits">Habits</span>
       <span data-i18n="hero.flashcards">Flashcards</span>
@@ -125,7 +124,7 @@
 
     <!-- First-visit welcome (shown instead of loginForm on first visit) -->
     <div id="gateWelcome" style="display:none;">
-      <p class="gate-welcome-text" data-i18n="login.welcome_text">Your personal command center. Organize projects, todos, habits, and more — your data stays yours.</p>
+      <p class="gate-welcome-text" data-i18n="login.welcome_text">Your personal command center. Organize todos, habits, and more — your data stays yours.</p>
       <button type="button" class="btn-primary gate-welcome-demo" id="gateWelcomeDemo" data-i18n="login.welcome_demo">Try the demo</button>
       <a class="gate-welcome-login" id="gateWelcomeLogin" href="#" data-i18n="login.welcome_login">I already have an account / Skip the demo</a>
     </div>
@@ -229,8 +228,7 @@ bun run server.js</pre>
   <header class="app-header">
     <h1 class="app-title" data-action="switch-view" data-view="welcome" style="cursor:pointer;" title="Go to Today"><svg class="storm-logo header-logo" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"></svg><span class="app-title-text">DeLaClaw</span></h1>
     <div class="view-switcher">
-      <button class="view-tab" id="tabWelcome" data-action="switch-view" data-view="welcome"><span data-icon="home" data-size="18" data-color="currentColor"></span> <span class="tab-label">Today</span></button>
-      <button class="view-tab active" id="tabProjects" data-action="switch-view" data-view="projects"><span data-icon="layout-grid" data-size="18" data-color="currentColor"></span> <span class="tab-label">Projects</span></button>
+      <button class="view-tab active" id="tabWelcome" data-action="switch-view" data-view="welcome"><span data-icon="home" data-size="18" data-color="currentColor"></span> <span class="tab-label">Today</span></button>
       <button class="view-tab" id="tabTodos" data-action="switch-view" data-view="todos"><span data-icon="list-checks" data-size="18" data-color="currentColor"></span> <span class="tab-label">TODOs</span></button>
       <button class="view-tab" id="tabHabits" data-action="switch-view" data-view="habits"><span data-icon="repeat" data-size="18" data-color="currentColor"></span> <span class="tab-label">Habits</span></button>
       <button class="view-tab" id="tabCalendar" data-action="switch-view" data-view="calendar"><span data-icon="calendar" data-size="18" data-color="currentColor"></span> <span class="tab-label">Calendar</span></button>
@@ -261,40 +259,6 @@ bun run server.js</pre>
 
   <!-- ===== WELCOME VIEW ===== -->
   <div id="welcomeView" class="welcome-container" style="display:none;"></div>
-
-  <!-- ===== PROJECTS VIEW ===== -->
-  <div id="projectsView" style="display:none;">
-    <div class="page-toolbar">
-      <div class="page-toolbar-left">
-        <div class="page-filters" id="projectFilters">
-          <button class="filter-btn active" data-filter="active" data-action="set-project-filter" data-filter="active">Active</button>
-          <button class="filter-btn" data-filter="all" data-action="set-project-filter" data-filter="all">All</button>
-          <select id="projectSortBy" class="page-sort" data-action="sort-projects">
-            <option value="manual">Manual order</option>
-            <option value="name">Name</option>
-            <option value="tasks">Task count</option>
-          </select>
-        </div>
-      </div>
-      <div class="page-toolbar-right">
-        <button class="btn" data-action="open-prompt-editor" title="Edit task-pickup prompt"><span data-icon="file-text" data-size="16"></span></button>
-        <button class="btn" data-action="toggle-archived" id="archiveToggleBtn" title="Toggle archived"><span data-icon="package" data-size="16"></span></button>
-        <button class="btn" data-action="open-add-project" title="Add project"><span data-icon="folder-plus" data-size="16"></span></button>
-        <div class="search-wrapper">
-          <button class="btn search-toggle" title="Search" data-action="toggle-search"><span data-icon="search" data-size="16"></span></button>
-          <span class="search-input-wrap"><input type="text" class="page-search" placeholder="Search tasks…" data-action="filter-projects"><button class="search-clear-btn" tabindex="-1" data-action="clear-search" aria-label="Clear search"><span data-icon="x" data-size="14"></span></button></span>
-        </div>
-      </div>
-    </div>
-    <div class="category-nav-buttons" id="projectNavButtons"></div>
-    <div class="main-content">
-      <div class="project-grid" id="projectGrid"></div>
-      <div class="archived-projects-section" id="archivedProjectsSection" style="display:none;">
-        <div class="section-title"><span data-icon="package" data-size="16"></span> Archived Projects</div>
-        <div id="archivedProjectsList"></div>
-      </div>
-    </div>
-  </div><!-- end projectsView -->
 
   <!-- ===== TODOS VIEW ===== -->
   <div id="todosView" style="display:none;">
@@ -475,17 +439,6 @@ bun run server.js</pre>
       <div class="footer-copyright"></div>
     </div>
   </footer>
-
-  <!-- Add/Edit Project Modals created dynamically by js/projects.js -->
-
-  <!-- Revision, Prompt Editor, Project Prompt modals created dynamically by js/projects.js -->
-
-  <!-- Edit Project Modal created dynamically by js/projects.js -->
-
-  <!-- Expanded Task Modal -->
-  <div class="modal-overlay" id="taskExpandModal">
-    <div class="modal task-modal" id="taskExpandContent"></div>
-  </div>
 
   <!-- Add Category Modal is created dynamically by js/todos.js -->
 

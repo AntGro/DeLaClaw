@@ -10,7 +10,7 @@ All files are served as raw, unminified source. No build step, no transpilation.
 
 ### JavaScript
 
-Feature modules live in `js/` and adapters in `js/adapters/`. The largest modules are `main.js` (app bootstrap, settings, login, view switching), `i18n.js` (translation strings for 3 languages), `habits.js`, and `flashcards.js`. Sharing logic is split across several modules (`sharing.js`, `sharing-ui.js`, `sharing-drive.js`, `sharing-interface.js`, `sharing-envelope.js`). Other modules handle individual features (todos, projects, birthdays, lists, welcome), drag-and-drop (`item-utils.js`), utilities, and the landing page (hero, logo).
+Feature modules live in `js/` and adapters in `js/adapters/`. The largest modules are `main.js` (app bootstrap, settings, login, view switching), `i18n.js` (translation strings for 3 languages), `habits.js`, and `flashcards.js`. Sharing logic is split across several modules (`sharing.js`, `sharing-ui.js`, `sharing-drive.js`, `sharing-interface.js`, `sharing-envelope.js`). Other modules handle individual features (todos, birthdays, lists, welcome), drag-and-drop (`item-utils.js`), utilities, and the landing page (hero, logo).
 
 ### CSS
 
@@ -56,7 +56,7 @@ Two resources block first paint:
 ## Runtime performance
 
 - **No virtual DOM**: all renders are full DOM replacements via `.innerHTML`. This is efficient for the current data scale (hundreds of items per table) but would need optimization for thousands.
-- **Sequential data loading**: on login, projects and settings are loaded sequentially before the first render. Feature-specific data (todos, habits, etc.) is loaded per-view. Could be parallelized with `Promise.all()` for faster startup.
+- **Sequential data loading**: on login, settings are loaded before the first render. Feature-specific data (todos, habits, etc.) is loaded per-view. Could be parallelized with `Promise.all()` for faster startup.
 - **No debouncing on search**: search/filter functions fire on every keypress. For large datasets, debouncing would help.
 - **Drag-and-drop**: uses long-press + pointer events with FLIP animation (not native HTML drag). Native `dragstart` is explicitly prevented. Performant for current list sizes.
 

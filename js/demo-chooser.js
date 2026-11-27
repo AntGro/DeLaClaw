@@ -12,12 +12,6 @@ import { localTimeZone, wallTimeToInstant } from './calendar-pure.js';
 function buildPrompt(lang) {
   const today = new Date().toISOString().slice(0, 10);
   const schema = `{
-  "projects": [
-    { "name": "Project Name", "shortname": "PRJ", "color": "#hex" }
-  ],
-  "tasks": [
-    { "project": "Project Name", "text": "Task description", "status": "todo|review|approved" }
-  ],
   "todos": [
     { "text": "To-do item", "priority": "urgent|high|medium|low|normal", "category": "Category", "due_date": "YYYY-MM-DD or null" }
   ],
@@ -50,7 +44,7 @@ function buildPrompt(lang) {
 
 **Personalise for me.** Use what you know about me — age, gender, location, profession, education, hobbies, interests — to shape the content. If you don't know something, make a reasonable assumption that feels coherent (e.g. pick a city, a profession, a few hobbies) and generate data that fits that persona.
 
-Generate 3–5 items per category. Use today (${today}) as reference for dates. IDs and timestamps are auto-generated — don't include them. For tasks, set "project" to the project's name. For list_items, set "list_name" to the list's name.
+Generate 3–5 items per category. Use today (${today}) as reference for dates. IDs and timestamps are auto-generated — don't include them. For list_items, set "list_name" to the list's name.
 
 **Sections.** Buckets can be grouped into nested sections. For TODOs and Habits, write a category as a path to nest it, e.g. "Reading > Fiction": include one section holding two buckets, plus one bucket nested two levels deep, e.g. "Reading > Non-Fiction > History". For Lists, add one list with "kind": "section" and give two other lists "parent" set to that section's name; list items always belong to a bucket list, never to a section.
 
@@ -69,7 +63,7 @@ ${schema}`,
 
 **Personnalise pour moi.** Utilise ce que tu sais sur moi — âge, genre, ville, métier, formation, loisirs, centres d'intérêt — pour façonner le contenu. Si tu ne sais pas, fais une hypothèse cohérente (choisis une ville, un métier, quelques hobbies) et génère des données qui collent à ce profil.
 
-Génère 3 à 5 éléments par catégorie. Utilise la date du jour (${today}) comme référence. Les IDs et timestamps sont auto-générés — ne les inclus pas. Pour les tâches, mets le nom du projet dans "project". Pour les list_items, mets le nom de la liste dans "list_name".
+Génère 3 à 5 éléments par catégorie. Utilise la date du jour (${today}) comme référence. Les IDs et timestamps sont auto-générés — ne les inclus pas. Pour les list_items, mets le nom de la liste dans "list_name".
 
 **Sections.** Les buckets peuvent être regroupés en sections imbriquées. Pour les TODOs et les Habitudes, écris une catégorie sous forme de chemin pour l'imbriquer, ex. « Lecture > Fiction » : inclus une section contenant deux buckets, plus un bucket imbriqué à deux niveaux, ex. « Lecture > Non-fiction > Histoire ». Pour les Listes, ajoute une liste avec "kind": "section" et mets "parent" à ce nom de section pour deux autres listes ; les éléments vont toujours dans une liste bucket, jamais dans une section.
 
@@ -88,7 +82,7 @@ ${schema}`,
 
 **Personaliza para mí.** Usa lo que sepas sobre mí — edad, género, ciudad, profesión, formación, hobbies, intereses — para dar forma al contenido. Si no lo sabes, haz una suposición coherente (elige una ciudad, una profesión, algunos hobbies) y genera datos que encajen con ese perfil.
 
-Genera 3–5 elementos por categoría. Usa la fecha de hoy (${today}) como referencia. Los IDs y timestamps se generan automáticamente — no los incluyas. Para las tareas, pon el nombre del proyecto en "project". Para list_items, pon el nombre de la lista en "list_name".
+Genera 3–5 elementos por categoría. Usa la fecha de hoy (${today}) como referencia. Los IDs y timestamps se generan automáticamente — no los incluyas. Para list_items, pon el nombre de la lista en "list_name".
 
 **Secciones.** Los buckets pueden agruparse en secciones anidadas. Para TODOs y Hábitos, escribe una categoría como ruta para anidarla, ej. «Lectura > Ficción»: incluye una sección con dos buckets, más un bucket anidado a dos niveles, ej. «Lectura > No ficción > Historia». Para Listas, añade una lista con "kind": "section" y pon "parent" con el nombre de esa sección en otras dos listas; los elementos van siempre a una lista bucket, nunca a una sección.
 
@@ -116,7 +110,7 @@ function parseCustomJSON(raw) {
   cleaned = cleaned.trim();
   const data = JSON.parse(cleaned);
   // Validate: must be an object with at least one recognised key
-  const validKeys = ['projects', 'tasks', 'todos', 'habits', 'flashcards', 'birthdays', 'events', 'lists', 'list_items'];
+  const validKeys = ['todos', 'habits', 'flashcards', 'birthdays', 'events', 'lists', 'list_items'];
   const found = Object.keys(data).filter(k => validKeys.includes(k));
   if (found.length === 0) throw new Error('No recognised data tables found');
   return data;
@@ -136,33 +130,6 @@ function normalizeCustomData(data) {
     if (!row.updated_at) row.updated_at = now;
     if (row.sort_order == null) row.sort_order = idx;
     return row;
-  }
-
-  // Build project name → ID map
-  const projNameToId = {};
-  if (data.projects) {
-    data.projects = data.projects.map((r, i) => {
-      base(r, 'proj', i);
-      if (r.archived == null) r.archived = false;
-      if (!r.links) r.links = [];
-      if (!r.tech) r.tech = '';
-      if (!r.shortname) r.shortname = r.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase();
-      if (!r.color) r.color = '#6366f1';
-      projNameToId[r.name] = r.id;
-      return r;
-    });
-  }
-
-  // Resolve task project references (name → ID)
-  if (data.tasks) {
-    data.tasks = data.tasks.map((r, i) => {
-      base(r, 'task', i);
-      if (!r.status) r.status = 'todo';
-      if (r.project && projNameToId[r.project]) {
-        r.project = projNameToId[r.project];
-      }
-      return r;
-    });
   }
 
   if (data.todos) {

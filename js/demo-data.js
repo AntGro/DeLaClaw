@@ -83,29 +83,6 @@ function sharedHabitCompletions() {
 
 // ── ENGLISH ──
 function en() {
-  const projects = [
-    { id: 'demo-proj-001', name: 'Website Redesign', shortname: 'WEB', color: '#6366f1', tech: 'Next.js, Tailwind', links: [{ label: 'Figma', url: 'https://figma.com/project-web' }], archived: false, sort_order: 0, created_at: d(-45), updated_at: d(-2) },
-    { id: 'demo-proj-002', name: 'Book Club — Spring Reads', shortname: 'BOOK', color: '#10b981', tech: '', links: [], archived: false, sort_order: 1, created_at: d(-30), updated_at: d(-5) },
-    { id: 'demo-proj-003', name: 'Apartment Move', shortname: 'APT', color: '#f59e0b', tech: '', links: [], archived: false, sort_order: 2, created_at: d(-20), updated_at: d(-1) },
-    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, PostgreSQL', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
-    { id: 'demo-proj-005', name: 'Q3 Marketing Plan', shortname: 'MKT', color: '#8b5cf6', tech: '', links: [], archived: true, sort_order: 4, created_at: d(-90), updated_at: d(-40) },
-  ];
-
-  const tasks = [
-    { id: 'demo-task-001', project: 'demo-proj-001', text: 'Finalise hero section copy', status: 'approved', sort_order: 0, created_at: d(-30), updated_at: d(-8) },
-    { id: 'demo-task-002', project: 'demo-proj-001', text: 'Build responsive navbar component', status: 'review', sort_order: 1, created_at: d(-25), updated_at: d(-1) },
-    { id: 'demo-task-003', project: 'demo-proj-001', text: 'Set up CI/CD pipeline', status: 'todo', sort_order: 2, created_at: d(-20), updated_at: d(-20) },
-    { id: 'demo-task-004', project: 'demo-proj-001', text: 'Performance audit with Lighthouse', status: 'todo', sort_order: 3, created_at: d(-15), updated_at: d(-15) },
-    { id: 'demo-task-005', project: 'demo-proj-002', text: 'Finish reading "Klara and the Sun"', status: 'approved', sort_order: 0, created_at: d(-28), updated_at: d(-10) },
-    { id: 'demo-task-006', project: 'demo-proj-002', text: 'Write review for group discussion', status: 'review', sort_order: 1, created_at: d(-10), updated_at: d(-2) },
-    { id: 'demo-task-007', project: 'demo-proj-003', text: 'Get quotes from 3 moving companies', status: 'approved', sort_order: 0, created_at: d(-18), updated_at: d(-7) },
-    { id: 'demo-task-008', project: 'demo-proj-003', text: 'Pack kitchen and living room', status: 'todo', sort_order: 1, created_at: d(-12), updated_at: d(-12) },
-    { id: 'demo-task-009', project: 'demo-proj-003', text: 'Forward mail to new address', status: 'todo', sort_order: 2, created_at: d(-10), updated_at: d(-10) },
-    { id: 'demo-task-010', project: 'demo-proj-004', text: 'Design onboarding flow mockups', status: 'review', sort_order: 0, created_at: d(-40), updated_at: d(-3) },
-    { id: 'demo-task-011', project: 'demo-proj-004', text: 'Implement recipe search API', status: 'approved', sort_order: 1, created_at: d(-50), updated_at: d(-20) },
-    { id: 'demo-task-012', project: 'demo-proj-004', text: 'Add push notifications for meal prep', status: 'todo', sort_order: 2, created_at: d(-15), updated_at: d(-15) },
-  ];
-
   const todos = [
     { id: 'demo-todo-001', text: 'Buy groceries (avocados, oat milk, spinach)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
     { id: 'demo-todo-002', text: 'Schedule dentist appointment', done: false, priority: 'normal', category: 'Health', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
@@ -222,34 +199,11 @@ function en() {
     { id: 'demo-li-023', list_id: 'demo-list-011', text: 'Colosseum tickets', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, events, lists, list_items };
+  return { todos, habits, habit_completions, flashcards, flashcard_notes, birthdays, events, lists, list_items };
 }
 
 // ── FRENCH ──
 function fr() {
-  const projects = [
-    { id: 'demo-proj-001', name: 'Refonte du site web', shortname: 'WEB', color: '#6366f1', tech: 'Next.js, Tailwind', links: [{ label: 'Figma', url: 'https://figma.com/projet-web' }], archived: false, sort_order: 0, created_at: d(-45), updated_at: d(-2) },
-    { id: 'demo-proj-002', name: 'Club de lecture — Printemps', shortname: 'LECT', color: '#10b981', tech: '', links: [], archived: false, sort_order: 1, created_at: d(-30), updated_at: d(-5) },
-    { id: 'demo-proj-003', name: 'Déménagement', shortname: 'APT', color: '#f59e0b', tech: '', links: [], archived: false, sort_order: 2, created_at: d(-20), updated_at: d(-1) },
-    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, PostgreSQL', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
-    { id: 'demo-proj-005', name: 'Plan marketing T3', shortname: 'MKT', color: '#8b5cf6', tech: '', links: [], archived: true, sort_order: 4, created_at: d(-90), updated_at: d(-40) },
-  ];
-
-  const tasks = [
-    { id: 'demo-task-001', project: 'demo-proj-001', text: 'Finaliser le texte de la section héro', status: 'approved', sort_order: 0, created_at: d(-30), updated_at: d(-8) },
-    { id: 'demo-task-002', project: 'demo-proj-001', text: 'Développer le composant navbar responsive', status: 'review', sort_order: 1, created_at: d(-25), updated_at: d(-1) },
-    { id: 'demo-task-003', project: 'demo-proj-001', text: 'Configurer le pipeline CI/CD', status: 'todo', sort_order: 2, created_at: d(-20), updated_at: d(-20) },
-    { id: 'demo-task-004', project: 'demo-proj-001', text: 'Audit performance avec Lighthouse', status: 'todo', sort_order: 3, created_at: d(-15), updated_at: d(-15) },
-    { id: 'demo-task-005', project: 'demo-proj-002', text: 'Terminer « Klara et le Soleil »', status: 'approved', sort_order: 0, created_at: d(-28), updated_at: d(-10) },
-    { id: 'demo-task-006', project: 'demo-proj-002', text: 'Rédiger une critique pour la discussion', status: 'review', sort_order: 1, created_at: d(-10), updated_at: d(-2) },
-    { id: 'demo-task-007', project: 'demo-proj-003', text: 'Demander 3 devis de déménageurs', status: 'approved', sort_order: 0, created_at: d(-18), updated_at: d(-7) },
-    { id: 'demo-task-008', project: 'demo-proj-003', text: 'Emballer cuisine et salon', status: 'todo', sort_order: 1, created_at: d(-12), updated_at: d(-12) },
-    { id: 'demo-task-009', project: 'demo-proj-003', text: 'Faire suivre le courrier', status: 'todo', sort_order: 2, created_at: d(-10), updated_at: d(-10) },
-    { id: 'demo-task-010', project: 'demo-proj-004', text: 'Créer les maquettes du parcours d\'accueil', status: 'review', sort_order: 0, created_at: d(-40), updated_at: d(-3) },
-    { id: 'demo-task-011', project: 'demo-proj-004', text: 'Implémenter l\'API de recherche de recettes', status: 'approved', sort_order: 1, created_at: d(-50), updated_at: d(-20) },
-    { id: 'demo-task-012', project: 'demo-proj-004', text: 'Ajouter les notifications push pour le meal prep', status: 'todo', sort_order: 2, created_at: d(-15), updated_at: d(-15) },
-  ];
-
   const todos = [
     { id: 'demo-todo-001', text: 'Faire les courses (avocat, lait d\'avoine, épinards)', done: false, priority: 'urgent', category: 'Personnel', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
     { id: 'demo-todo-002', text: 'Prendre rendez-vous chez le dentiste', done: false, priority: 'normal', category: 'Santé', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
@@ -361,34 +315,11 @@ function fr() {
   ];
 
   // Re-use same habit_completions (ids are the same, habit_ids match)
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events, lists, list_items };
+  return { todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events, lists, list_items };
 }
 
 // ── SPANISH ──
 function es() {
-  const projects = [
-    { id: 'demo-proj-001', name: 'Rediseño web', shortname: 'WEB', color: '#6366f1', tech: 'Next.js, Tailwind', links: [{ label: 'Figma', url: 'https://figma.com/proyecto-web' }], archived: false, sort_order: 0, created_at: d(-45), updated_at: d(-2) },
-    { id: 'demo-proj-002', name: 'Club de lectura — Primavera', shortname: 'LECT', color: '#10b981', tech: '', links: [], archived: false, sort_order: 1, created_at: d(-30), updated_at: d(-5) },
-    { id: 'demo-proj-003', name: 'Mudanza', shortname: 'APT', color: '#f59e0b', tech: '', links: [], archived: false, sort_order: 2, created_at: d(-20), updated_at: d(-1) },
-    { id: 'demo-proj-004', name: 'Side Project — Mealwise', shortname: 'MEAL', color: '#ec4899', tech: 'React Native, PostgreSQL', links: [{ label: 'GitHub', url: 'https://github.com/demo/mealwise' }], archived: false, sort_order: 3, created_at: d(-60), updated_at: d(-3) },
-    { id: 'demo-proj-005', name: 'Plan de marketing T3', shortname: 'MKT', color: '#8b5cf6', tech: '', links: [], archived: true, sort_order: 4, created_at: d(-90), updated_at: d(-40) },
-  ];
-
-  const tasks = [
-    { id: 'demo-task-001', project: 'demo-proj-001', text: 'Finalizar el copy de la sección hero', status: 'approved', sort_order: 0, created_at: d(-30), updated_at: d(-8) },
-    { id: 'demo-task-002', project: 'demo-proj-001', text: 'Construir el componente navbar responsive', status: 'review', sort_order: 1, created_at: d(-25), updated_at: d(-1) },
-    { id: 'demo-task-003', project: 'demo-proj-001', text: 'Configurar el pipeline CI/CD', status: 'todo', sort_order: 2, created_at: d(-20), updated_at: d(-20) },
-    { id: 'demo-task-004', project: 'demo-proj-001', text: 'Auditoría de rendimiento con Lighthouse', status: 'todo', sort_order: 3, created_at: d(-15), updated_at: d(-15) },
-    { id: 'demo-task-005', project: 'demo-proj-002', text: 'Terminar de leer «Klara y el Sol»', status: 'approved', sort_order: 0, created_at: d(-28), updated_at: d(-10) },
-    { id: 'demo-task-006', project: 'demo-proj-002', text: 'Escribir la reseña para la discusión', status: 'review', sort_order: 1, created_at: d(-10), updated_at: d(-2) },
-    { id: 'demo-task-007', project: 'demo-proj-003', text: 'Pedir 3 presupuestos de mudanza', status: 'approved', sort_order: 0, created_at: d(-18), updated_at: d(-7) },
-    { id: 'demo-task-008', project: 'demo-proj-003', text: 'Empacar cocina y salón', status: 'todo', sort_order: 1, created_at: d(-12), updated_at: d(-12) },
-    { id: 'demo-task-009', project: 'demo-proj-003', text: 'Redirigir el correo a la nueva dirección', status: 'todo', sort_order: 2, created_at: d(-10), updated_at: d(-10) },
-    { id: 'demo-task-010', project: 'demo-proj-004', text: 'Diseñar mockups del flujo de onboarding', status: 'review', sort_order: 0, created_at: d(-40), updated_at: d(-3) },
-    { id: 'demo-task-011', project: 'demo-proj-004', text: 'Implementar la API de búsqueda de recetas', status: 'approved', sort_order: 1, created_at: d(-50), updated_at: d(-20) },
-    { id: 'demo-task-012', project: 'demo-proj-004', text: 'Añadir notificaciones push para meal prep', status: 'todo', sort_order: 2, created_at: d(-15), updated_at: d(-15) },
-  ];
-
   const todos = [
     { id: 'demo-todo-001', text: 'Comprar víveres (aguacate, leche de avena, espinacas)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
     { id: 'demo-todo-002', text: 'Pedir cita con el dentista', done: false, priority: 'normal', category: 'Salud', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
@@ -499,7 +430,7 @@ function es() {
     { id: 'demo-li-023', list_id: 'demo-list-011', text: 'Entradas Coliseo', checked: 0, note: null, sort_order: 0, created_at: d(-6), updated_at: d(-6) },
   ];
 
-  return { projects, tasks, todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events, lists, list_items };
+  return { todos, habits, habit_completions: sharedHabitCompletions(), flashcards, flashcard_notes, birthdays, events, lists, list_items };
 }
 
 // ── MAIN EXPORT ──
@@ -759,7 +690,7 @@ Entonces empecemos.
 /** Returns an empty dataset with the same table keys */
 export function getEmptyData() {
   return {
-    projects: [], tasks: [], todos: [], habits: [], habit_completions: [],
+    todos: [], habits: [], habit_completions: [],
     flashcards: [], flashcard_notes: [], birthdays: [], events: [],
     lists: [], list_items: [],
     settings: [], prompts: [], texts: [], text_line_progress: [], daily_visits: [],

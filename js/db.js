@@ -8,7 +8,7 @@
 // Usage:
 //   import db from './db.js';
 //   db.setAdapter(someAdapter);     // called once at connect time
-//   const { data } = await db.from('projects').select('*');
+//   const { data } = await db.from('todos').select('*');
 // ===================================================================
 
 let _adapter = null;

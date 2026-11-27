@@ -47,7 +47,7 @@ function renderMd(text) {
   html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/\[([^\]]+)\]\((www\.[^\s)]+)\)/g, '<a href="https://$2" target="_blank" rel="noopener">$1</a>');
   // Internal deep links [text](#type/id)
-  html = html.replace(/\[([^\]]+)\]\(#((?:todo|habit|project|task|birthday|vest|flashcard|list|listitem)\/[\w-]+)\)/g, (_, text, ref) => {
+  html = html.replace(/\[([^\]]+)\]\(#((?:todo|habit|birthday|vest|flashcard|list|listitem)\/[\w-]+)\)/g, (_, text, ref) => {
     if (!parseDeepLink('#' + ref)) return `[${text}](#${ref})`;
     return `<a href="#${ref}" class="deep-link" data-deep-link="${ref}">${text}</a>`;
   });
@@ -338,11 +338,6 @@ async function executeConfirmAction() {
 
 // Close modals on overlay click / Escape
 document.addEventListener('click', e => {
-  if (e.target.id === 'editProjectModal') closeEditProjectModal();
-  if (e.target.id === 'taskExpandModal') closeTaskExpandModal();
-  if (e.target.id === 'revisionModal') closeRevisionModal();
-  if (e.target.id === 'promptEditorModal') closePromptEditor();
-  if (e.target.id === 'projectPromptModal') closeProjectPrompt();
   if (e.target.id === 'snoozeModal') closeSnoozeModal();
   if (e.target.id === 'confirmActionModal') closeConfirmAction();
   if (e.target.id === 'addCategoryModal') closeAddCategoryModal();
@@ -356,7 +351,7 @@ document.addEventListener('click', e => {
   if (e.target.id === 'editListModal') closeEditListModal();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeAddProjectModal(); closeEditProjectModal(); closeTaskExpandModal(); closeRevisionModal(); closePromptEditor(); closeProjectPrompt(); closeSnoozeModal(); closeConfirmAction(); closeAddCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
+  if (e.key === 'Escape') { closeSnoozeModal(); closeConfirmAction(); closeAddCategoryModal(); if (window.closeAddHabitModal) closeAddHabitModal(); if (window.closeEditHabitModal) closeEditHabitModal(); if (window.closeHabitHistoryModal) closeHabitHistoryModal(); if (window.closeAddHabitCategoryModal) closeAddHabitCategoryModal(); if (window.closeAddBirthdayModal) closeAddBirthdayModal(); if (window.closeEditBirthdayModal) closeEditBirthdayModal(); if (window.closeAddListModal) closeAddListModal(); if (window.closeEditListModal) closeEditListModal(); if (window.closeMigrationModal) closeMigrationModal(); if (window.closeCompareModal) closeCompareModal(); }
 });
 
 
@@ -594,7 +589,7 @@ function formatSnoozeUntil(value) {
 }
 
 // ===================================================================
-// TRUNCATE WITH SHOW MORE (shared between projects & todos)
+// TRUNCATE WITH SHOW MORE (shared across item surfaces)
 // ===================================================================
 /** Visible length of text, counting [label](url) as just the label length */
 function visibleLength(str) {
@@ -903,7 +898,7 @@ async function backfillCategoryColors(table, catMap) {
 
 /** Map item type prefix to its view name */
 const DEEP_LINK_TYPE_MAP = {
-  todo: 'todos', habit: 'habits', project: 'projects', task: 'projects',
+  todo: 'todos', habit: 'habits',
   birthday: 'birthdays', flashcard: 'flashcards',
   list: 'lists', listitem: 'lists',
   todocat: 'todos', habitcat: 'habits',

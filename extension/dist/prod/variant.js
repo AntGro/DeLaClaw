@@ -11,5 +11,5 @@ export const VARIANT = {
   // Schema version the extension knows, stamped from the repo's latest
   // DRIVE_MIGRATIONS key at packaging time. A live schema_version newer
   // than this refuses all writes (contracts §6).
-  knownSchemaVersion: '2.32.149',
+  knownSchemaVersion: '2.32.190',
 };

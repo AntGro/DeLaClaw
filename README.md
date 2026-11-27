@@ -19,7 +19,6 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 | Module | Description |
 |---|---|
 | **Today** | Daily briefing: focus TODOs, due habits, memory reviews, upcoming birthdays, stats |
-| **Projects** | Kanban-style project boards with task statuses, links, and drag-and-drop |
 | **TODOs** | Categorized tasks with 5 priority levels, due dates, snooze, drag-and-drop reordering |
 | **Habits** | Recurring habits with flexible scheduling (structured rules + free text), completion tracking, streaks |
 | **Memory** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
@@ -87,7 +86,6 @@ js/
   calendar-sync.js      Google Calendar sync
   events.js             Calendar events (timed + timezone, or full-day) and their CRUD modals
   welcome.js            Today dashboard
-  projects.js           Project boards and task management
   todos.js              TODO management
   habits.js             Habit tracking
   frequency-rule.js     Pure habit scheduling rules (next-due computation)

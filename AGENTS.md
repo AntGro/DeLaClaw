@@ -19,7 +19,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 - When adding any interactive element (button, toggle, checkbox, link that mutates state), ask: what happens if it fires 2x before the first promise resolves? Does it duplicate a task, double-toggle, double-insert?
 - Rule: one-click → disable until fulfilled.
   - Modal saves: use `guard()` in `js/main.js` (adds `disabled` + `saving`/`is-pending` + `aria-busy`).
-  - List items (habit DONE / TODO DONE / project task approve/promote): use per-ID pending Sets (`_pendingHabitDones`, `_pendingTodoToggles`, `_pendingTaskStatus`). Allow concurrent different IDs, block same ID double-click.
+  - List items (habit DONE / TODO DONE): use per-ID pending Sets (`_pendingHabitDones`, `_pendingTodoToggles`). Allow concurrent different IDs, block same ID double-click.
   - Pass ids via `data-*-id` attributes for queryability; handlers read them from the delegated event. Inline `onclick` handlers were removed (none remain in `js/` or `index.html`) — never add one back.
 - Enforced from v1.346. Tests guard existence of debounce/pending logic.
 
@@ -38,7 +38,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 **1.5 AI-native dependency index (CODEMAP) + Feature contracts — mandatory for agents**
 - Generated: `.agents/CODEMAP.json` + `.agents/CODEMAP.md` (human-readable matrix). Source: `scripts/generate-codemap.js`. Do not hand-edit. Sizes and counts live in CODEMAP itself — do not restate them here.
 - Contains per `js/*.js`: `entry`, `loc`, `tables`, `state`, `depends_on`, `dependents` (blast radius), `ui_components` (reusable CSS), `i18n_prefix`, `guards` (`guard`/`pendingSet`), `esc_count`, `window_exposed`.
-- Features, core modules and adapters are enumerated in CODEMAP itself — it is the source of truth, so they are not listed here. `welcome` aggregates todos, habits, flashcards and birthdays (birthdays via calendar) — not lists or projects.
+- Features, core modules and adapters are enumerated in CODEMAP itself — it is the source of truth, so they are not listed here. `welcome` aggregates todos, habits, flashcards and birthdays (birthdays via calendar) — not lists.
 - Feature contracts: `.agents/contracts/*.md` — agent-only, NOT in `docs-site`. Captures invariants CODEMAP can't: single source of truth (`isStructuredRule()`), guard patterns, XSS fields, welcome edges, business rules. BEFORE editing a feature, agents MUST read `CODEMAP.json:features[feature]` + `contracts/<feature>.md` if present.
 - Rule: BEFORE editing any `js/*.js`, agents MUST read `.agents/CODEMAP.json` → `features[feature]` and relevant `core` entries. Reuse `depends_on` + `ui_components`, check `dependents` for impact scope, follow `guards` per AGENTS 1.2, verify `esc_count`/`tables` for XSS/schema impact.
 - Freshness: pre-commit auto-regenerates JSON+MD and stages them. `tests/tests.js` will fail if JSON is out-of-date (CODEMAP freshness test). No manual sync.
@@ -61,7 +61,7 @@ DeLaClaw is an anti-SaaS personal life OS. Single-page app, no build step, no fr
 ## 3. Security
 
 - **XSS**: No `innerHTML` with user data unless escaped. Wrap all user fields (`name`, `text`, `note`, `brand`, etc.) in `esc()` when interpolating into template literals. `renderMd()` and `truncateWithShowMore()` already esc internally, don't double-wrap. `showConfirmAction` uses `.textContent` by default (safe); its `messageHtml`/`detailHtml` options take `innerHTML` only with content already run through `renderMd`.
-- **Safe DOM for URLs**: TODO/project links with user-provided URLs must use safe allowlist check, not raw `innerHTML`.
+- **Safe DOM for URLs**: TODO/list links with user-provided URLs must use safe allowlist check, not raw `innerHTML`.
 - **CSP hardening (sec-004)**: No vendored JS and no `cdn.jsdelivr.net` for app code since three.js was dropped (Nov 2026) — the hero storm is a single SVG from hero to gate (logo.js), no canvas stage. CSP meta in `index.html`: `default-src 'self'; script-src 'self' accounts.google.com apis.google.com gstatic cloudflareinsights; style-src 'self' 'unsafe-inline'...;` — `unsafe-inline` removed from `script-src` since v1.350 (inline scripts extracted to `js/bootstrap.js` + `js/sw-register.js`). `style-src` still needs `unsafe-inline` for `style=` attributes. Cloudflare Web Analytics beacon allowed in both `script-src` (`static.cloudflareinsights.com`) and `connect-src` (`cloudflareinsights.com`).
 - **Google Identity exception**: GSI (`accounts.google.com/gsi/client` + `apis.google.com/js/api.js`) must stay CDN per Google ToS, no SRI allowed. Documented exception allowed only via CSP.
 

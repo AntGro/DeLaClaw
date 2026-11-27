@@ -1,5 +1,5 @@
 // ===================================================================
-// SHARED ITEM UTILITIES — used by projects.js and todos.js
+// SHARED ITEM UTILITIES — used by todos.js, habits.js, lists.js and flashcards.js
 // ===================================================================
 
 import { showToast, isTouchDevice } from './utils.js';
@@ -101,7 +101,6 @@ const TOUCH_PRIMARY_ACTIONS = {
   todo: ['toggle-todo', 'welcome-toggle-todo', 'edit-todo-inline'],
   habit: ['mark-habit-done', 'welcome-mark-habit-done', 'open-edit-habit-modal', 'edit-habit-inline'],
   list: ['attach-to-list-item', 'edit-list-item-inline'],
-  task: ['update-task-status', 'prompt-edit-task'],
   card: ['open-edit-flashcard', 'delete-flashcard'],
   text: ['start-text-practice-for-text', 'start-text-practice-all-chunks'],
   draft: ['request-proposal', 'start-inline-edit-draft', 'delete-draft'],
@@ -125,7 +124,7 @@ function splitRowActions(keys, primarySelectors) {
 // Touch row-action compaction: on touch-first devices each row shows its
 // two primary actions plus a kebab menu with the rest (see
 // TOUCH_PRIMARY_ACTIONS). Runs inside initItemHoverDelay's touch branch,
-// so every surface using it is covered (TODOs, Habits, Lists, Projects,
+// so every surface using it is covered (TODOs, Habits, Lists,
 // Memory cards/texts/drafts, and the Welcome focus rows, which use the
 // welcome-* action variants). Unknown rows (calendar) are left alone.
 function touchPrimaryConfigFor(item) {
@@ -289,7 +288,7 @@ function openRowActionsMenu(kebab, actions) {
 // ===================================================================
 // HOVER DELAY — show action buttons on hover / single-click
 // ===================================================================
-// Replaces initTaskHoverDelay (projects) and initTodoHoverDelay (todos)
+// Replaces the per-surface hover-delay inits
 export function initItemHoverDelay(container, {
   itemSelector,
   actionsSelector,
@@ -404,7 +403,7 @@ export function initItemHoverDelay(container, {
 // ===================================================================
 // ITEM-LEVEL DRAG & DROP
 // ===================================================================
-// Replaces initDragDrop (projects) and initTodoDragDropForCard (todos)
+// Replaces the per-surface drag-drop inits
 export function initItemDragDrop(container, {
   itemSelector,
   excludeSelector = 'button, a, input, textarea, select',
@@ -1595,7 +1594,7 @@ export function initNavBtnReorder(containerId, { idAttr, onReorder, skipIds, cro
 // ===================================================================
 
 function bucketKey(el) {
-  return el.id || el.dataset.category || el.dataset.project || el.dataset.listId || el.dataset.deck || null;
+  return el.id || el.dataset.category || el.dataset.listId || el.dataset.deck || null;
 }
 
 /** Snapshot positions of all .project-card elements inside a container. */

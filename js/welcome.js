@@ -22,7 +22,6 @@ let wFlashcards = [];
 let wTexts = [];
 let wTextProgress = [];
 let wBirthdays = [];
-let wProjectCount = 0;
 // Weeks from the current week shown in the Welcome calendar strip.
 // Welcome-owned: navigating here never moves the Calendar tab's anchor.
 let wCalWeekOffset = 0;
@@ -101,8 +100,6 @@ async function refreshWelcome() {
   wTexts = getTexts();
   wTextProgress = getTextProgress();
   wBirthdays = state.allBirthdays;
-  const archivedIds = state.archivedProjectIds || [];
-  wProjectCount = state.PROJECTS.filter(p => !archivedIds.includes(p.id)).length;
 }
 
 // ── Listen for todo mutations from the TODOs module ──
@@ -755,7 +752,6 @@ function renderWelcome() {
     { icon: 'circle-check', value: todosDoneWeek, label: t('welcome.todos_done_week'), color: '#10b981' },
     { icon: 'repeat', value: wHabitCompletionsWeek, label: t('welcome.habits_done_week'), color: '#ec4899' },
     { type: 'memory', color: '#06b6d4' },
-    { icon: 'layout-grid', value: wProjectCount, label: t('welcome.projects'), color: '#6366f1' },
     { icon: 'calendar-days', value: eventsNext7.size, label: t('welcome.events_next_7_days'), color: 'var(--event-color)' },
   ];
   for (const s of stats) {

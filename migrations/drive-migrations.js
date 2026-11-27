@@ -17,6 +17,7 @@
 //
 import { toLocalDateString, prevDay, nextDay } from '../js/daily-visits.js';
 import { recomputeNextDueForMigration } from '../js/frequency-rule.js';
+import { DEFAULT_CATEGORY_PALETTE } from '../js/state.js';
 // After each migration:
 //   1. schema_version is bumped in the in-memory settings (never by the
 //      migration itself — see rule 5 below)
@@ -539,6 +540,156 @@ export const DRIVE_MIGRATIONS = {
     // Missing stays missing (= no scores yet).
     for (const row of (store.text_line_progress || [])) {
       if (Array.isArray(row.recent_scores)) row.recent_scores = JSON.stringify(row.recent_scores);
+    }
+  },
+
+  '2.32.190': async (store) => {
+    // 2.32.190: Projects tab removal — projects, their tasks and their
+    // prompts migrate into Lists, inside a "<Migrated> Projects" section
+    // (fixed id, last position, next palette colour as if the user had
+    // created a list bucket). Follows the Wardrobe precedent (2.9.17):
+    // prefixed ids, a '*' catch-all, lost fields carried in item notes.
+    // Mapping (decided 2026-11-27): project -> list (name, shortname,
+    // colour, sort order kept); task -> list item, checked iff status is
+    // 'approved' or 'idea-shipped'; the old status survives as a note
+    // line only when the checkbox cannot express it (not todo, approved
+    // or idea-shipped); plan_note / hatch_response / context fold into
+    // the same note field block. A project's tech + links become a
+    // "Project info" item at the top of its list (links as [label](url));
+    // its prompt becomes the top item (text = the prompt). The global
+    // task-pickup prompt (prompts key 'global') goes in a '*' list.
+    // Archived projects (settings key archived_project_ids) land in an
+    // "Archived" subsection of the section. Empty projects keep an empty
+    // list. Old deep links (#project/<id>, #task/<id>) are NOT translated
+    // — they break with the tab. The review/approve workflow has no list
+    // equivalent and is dropped with it.
+    // The source tables stay in DRIVE_TABLES this release (the runner
+    // loads them and flushes the emptied arrays); dropping them from the
+    // table list is a later cleanup once every account has migrated.
+    const projects = Array.isArray(store.projects) ? store.projects : [];
+    const tasks = Array.isArray(store.tasks) ? store.tasks : [];
+    const prompts = Array.isArray(store.prompts) ? store.prompts : [];
+    const settings = Array.isArray(store.settings) ? store.settings : [];
+    const archivedIds = new Set();
+    const archivedRow = settings.find((s) => s.key === 'archived_project_ids');
+    if (archivedRow) {
+      try { for (const id of JSON.parse(archivedRow.value) || []) archivedIds.add(id); } catch { /* keep empty */ }
+    }
+    const promptByKey = new Map();
+    for (const p of prompts) if (p.key) promptByKey.set(p.key, p.text);
+    const globalPrompt = promptByKey.get('global');
+    const hasGlobalPrompt = typeof globalPrompt === 'string' && globalPrompt.trim() !== '';
+    const buildTaskNote = (t) => {
+      const lines = [];
+      if (t.status && t.status !== 'todo' && t.status !== 'approved' && t.status !== 'idea-shipped') lines.push(`Status: ${t.status}`);
+      if (t.plan_note) lines.push(`Plan: ${t.plan_note}`);
+      if (t.hatch_response) lines.push(`Claw: ${t.hatch_response}`);
+      if (t.context) lines.push(`Context: ${t.context}`);
+      return lines.length ? lines.join('\n') : null;
+    };
+    const buildProjectInfoNote = (p) => {
+      const lines = [];
+      if (p.tech) lines.push(`Tech: ${p.tech}`);
+      const links = typeof p.links === 'string' ? (() => { try { return JSON.parse(p.links); } catch { return []; } })() : (p.links || []);
+      for (const l of (Array.isArray(links) ? links : [])) {
+        if (!l || !l.url) continue;
+        lines.push(`[${l.label || l.url}](${l.url})`);
+      }
+      return lines.length ? lines.join('\n') : null;
+    };
+    const now = new Date().toISOString();
+    store.lists = store.lists || [];
+    store.list_items = store.list_items || [];
+    const alreadyMigrated = store.lists.some((l) => l.id === 'mig_projects');
+    if (!alreadyMigrated && (projects.length || hasGlobalPrompt)) {
+      const usedColors = new Set(store.lists.map((l) => l.color).filter(Boolean));
+      const sectionColor = DEFAULT_CATEGORY_PALETTE.find((c) => !usedColors.has(c))
+        || DEFAULT_CATEGORY_PALETTE[store.lists.length % DEFAULT_CATEGORY_PALETTE.length];
+      store.lists.push({
+        id: 'mig_projects', name: '<Migrated> Projects',
+        shortname: null, color: sectionColor, icon: null,
+        sort_order: 9999, archived: 0, kind: 'section', parent_id: null,
+        owner_id: null, created_at: now, updated_at: now,
+      });
+      const hasArchived = projects.some((p) => archivedIds.has(p.id));
+      if (hasArchived) {
+        store.lists.push({
+          id: 'mig_projects_archived', name: 'Archived',
+          shortname: null, color: sectionColor, icon: null,
+          sort_order: 9999, archived: 0, kind: 'section', parent_id: 'mig_projects',
+          owner_id: null, created_at: now, updated_at: now,
+        });
+      }
+      if (hasGlobalPrompt) {
+        store.lists.push({
+          id: 'mig_projects_star', name: '*',
+          shortname: null, color: sectionColor, icon: null,
+          sort_order: 0, archived: 0, kind: 'bucket', parent_id: 'mig_projects',
+          owner_id: null, created_at: now, updated_at: now,
+        });
+        store.list_items.push({
+          id: 'mig_prompt_global', list_id: 'mig_projects_star', text: globalPrompt, checked: 0,
+          note: null, sort_order: 0, shared_id: null, shared_group_id: null,
+          owner_id: null, created_at: now, updated_at: now,
+        });
+      }
+      const tasksByProject = new Map();
+      for (const t of tasks) {
+        if (!tasksByProject.has(t.project)) tasksByProject.set(t.project, []);
+        tasksByProject.get(t.project).push(t);
+      }
+      for (const p of projects) {
+        const listId = `mig_${p.id}`;
+        store.lists.push({
+          id: listId, name: p.name,
+          shortname: p.shortname ?? null, color: p.color ?? null, icon: null,
+          sort_order: p.sort_order ?? 0, archived: 0, kind: 'bucket',
+          parent_id: archivedIds.has(p.id) ? 'mig_projects_archived' : 'mig_projects',
+          owner_id: p.owner_id ?? null, created_at: p.created_at, updated_at: p.updated_at,
+        });
+        let topOrder = -2;
+        const promptText = promptByKey.get(p.id);
+        if (typeof promptText === 'string' && promptText.trim() !== '') {
+          store.list_items.push({
+            id: `mig_prompt_${p.id}`, list_id: listId, text: promptText, checked: 0,
+            note: null, sort_order: topOrder++,
+            shared_id: null, shared_group_id: null,
+            owner_id: p.owner_id ?? null, created_at: p.created_at, updated_at: p.updated_at,
+          });
+        }
+        const infoNote = buildProjectInfoNote(p);
+        if (infoNote) {
+          store.list_items.push({
+            id: `mig_info_${p.id}`, list_id: listId, text: 'Project info', checked: 0,
+            note: infoNote, sort_order: topOrder++,
+            shared_id: null, shared_group_id: null,
+            owner_id: p.owner_id ?? null, created_at: p.created_at, updated_at: p.updated_at,
+          });
+        }
+        const projectTasks = (tasksByProject.get(p.id) || []).slice()
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        for (const t of projectTasks) {
+          store.list_items.push({
+            id: `mig_${t.id}`, list_id: listId, text: t.text,
+            checked: (t.status === 'approved' || t.status === 'idea-shipped') ? 1 : 0,
+            note: buildTaskNote(t), sort_order: t.sort_order ?? 0,
+            shared_id: null, shared_group_id: null,
+            owner_id: t.owner_id ?? null, created_at: t.created_at, updated_at: t.updated_at,
+          });
+        }
+      }
+      // Tasks whose project is gone have no list to live in; like the
+      // Wardrobe migration's unplaceable items, they are dropped.
+    }
+    // No dead data: the source tables empty out (the runner flushes the
+    // changed tables, so the files land as []) and the project settings
+    // rows go with them.
+    delete store.projects;
+    delete store.tasks;
+    delete store.prompts;
+    for (const key of ['archived_project_ids', 'show_archived']) {
+      const i = settings.findIndex((s) => s.key === key);
+      if (i !== -1) settings.splice(i, 1);
     }
   },
 };

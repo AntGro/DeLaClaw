@@ -7,7 +7,6 @@ DeLaClaw is a no-build, self-hosted personal dashboard. It runs entirely in the 
 ## Features
 
 - **Today** — Aggregated daily view: focus TODOs, due habits, memory reviews, upcoming birthdays
-- **Projects & Tasks** — Project boards with task workflows (todo → in-progress → review → approved, plus revision for rework)
 - **TODOs** — Categorised to-do lists with snooze, priority, deadlines, and sharing
 - **Habits** — Recurring habit tracker with calendar view, streak stats, and sharing
 - **Memory** — Spaced-repetition flashcards and text revision decks

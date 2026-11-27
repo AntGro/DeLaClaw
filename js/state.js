@@ -7,15 +7,13 @@ import db from './db.js';
 const state = {
   /** @type {import('./db.js').default} */
   db,
-  PROJECTS: [],
-  allTasks: [],
   allHabits: [],
   allHabitCompletions: [],
   allBirthdays: [],
   allEvents: [],
   allLists: [],
   allListItems: [],
-  currentView: 'projects',
+  currentView: 'welcome',
   dbSchemaVersion: '0.000',
   offlineMode: false,
   pausedMode: false,
@@ -24,8 +22,6 @@ const state = {
   authUser: null,
   tabVisibility: null,    // {key: bool} from settings DB
   tabOrder: null,         // [key, …] from settings DB
-  archivedProjectIds: [], // [id, …] from settings DB
-  showArchived: false,    // bool from settings DB
 };
 
 export default state;

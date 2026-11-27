@@ -590,7 +590,7 @@ function renderCategoryCard(catId) {
 
   const catDragHandle = '';
 
-  // Done toggle (collapsible, like archived tasks in projects)
+  // Done toggle (collapsible, like archived tasks)
   let doneToggle = '';
   if (doneCount > 0 && todoFilter !== 'done') {
     const deleteAllBtn = `<button class="delete-all-archived-btn" data-action="delete-all-done" data-category="${esc(catId)}" title="${t('todos.delete_all_done')}">${lucideIcon("trash-2",16)}</button>`;

@@ -3,6 +3,7 @@
 // ===================================================================
 
 import { recomputeNextDueForMigration } from '../js/frequency-rule.js';
+import { DEFAULT_CATEGORY_PALETTE } from '../js/state.js';
 // Each key is a version string. Migrations run in version order on
 // server startup when schema_version is behind.
 //
@@ -701,4 +702,103 @@ export const LOCAL_MIGRATIONS = {
   '2.32.149': `
     ALTER TABLE text_line_progress ADD COLUMN recent_scores TEXT;
   `,
+
+  // 2.32.190: Projects tab removal — the SQL-side mirror of the Drive
+  // migration of the same version (see migrations/drive-migrations.js
+  // for the mapping and the decisions behind it): projects become lists
+  // inside a "<Migrated> Projects" section, tasks become list items,
+  // prompts become top items, the global prompt lands in a '*' list,
+  // archived projects in an "Archived" subsection. Source rows are
+  // deleted afterwards; the tables themselves stay in the schema (and
+  // in DRIVE_TABLES) until a later cleanup, once every account has
+  // migrated.
+  '2.32.190': (db) => {
+    const hasTable = (name) => db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=?").get(name).n > 0;
+    if (!hasTable('projects')) return;
+    const projects = db.prepare('SELECT * FROM projects').all();
+    const tasks = hasTable('tasks') ? db.prepare('SELECT * FROM tasks').all() : [];
+    const prompts = hasTable('prompts') ? db.prepare('SELECT * FROM prompts').all() : [];
+    const settings = hasTable('settings') ? db.prepare('SELECT key, value FROM settings').all() : [];
+    const archivedIds = new Set();
+    const archivedRow = settings.find((s) => s.key === 'archived_project_ids');
+    if (archivedRow) {
+      try { for (const id of JSON.parse(archivedRow.value) || []) archivedIds.add(id); } catch { /* keep empty */ }
+    }
+    const promptByKey = new Map();
+    for (const p of prompts) if (p.key) promptByKey.set(p.key, p.text);
+    const globalPrompt = promptByKey.get('global');
+    const hasGlobalPrompt = typeof globalPrompt === 'string' && globalPrompt.trim() !== '';
+    const buildTaskNote = (t) => {
+      const lines = [];
+      if (t.status && t.status !== 'todo' && t.status !== 'approved' && t.status !== 'idea-shipped') lines.push(`Status: ${t.status}`);
+      if (t.plan_note) lines.push(`Plan: ${t.plan_note}`);
+      if (t.hatch_response) lines.push(`Claw: ${t.hatch_response}`);
+      if (t.context) lines.push(`Context: ${t.context}`);
+      return lines.length ? lines.join('\n') : null;
+    };
+    const buildProjectInfoNote = (p) => {
+      const lines = [];
+      if (p.tech) lines.push(`Tech: ${p.tech}`);
+      let links = [];
+      if (typeof p.links === 'string') { try { links = JSON.parse(p.links); } catch { links = []; } }
+      else if (Array.isArray(p.links)) links = p.links;
+      for (const l of links) {
+        if (!l || !l.url) continue;
+        lines.push(`[${l.label || l.url}](${l.url})`);
+      }
+      return lines.length ? lines.join('\n') : null;
+    };
+    const now = new Date().toISOString();
+    const insertList = db.prepare('INSERT INTO lists (id, name, shortname, color, icon, sort_order, archived, kind, parent_id, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertItem = db.prepare('INSERT INTO list_items (id, list_id, text, checked, note, attachments, sort_order, shared_id, shared_group_id, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const existing = db.prepare("SELECT COUNT(*) AS n FROM lists WHERE id = 'mig_projects'").get().n;
+    if (!existing && (projects.length || hasGlobalPrompt)) {
+      const usedColors = new Set(db.prepare('SELECT color FROM lists').all().map((l) => l.color).filter(Boolean));
+      const listCount = db.prepare('SELECT COUNT(*) AS n FROM lists').get().n;
+      const sectionColor = DEFAULT_CATEGORY_PALETTE.find((c) => !usedColors.has(c))
+        || DEFAULT_CATEGORY_PALETTE[listCount % DEFAULT_CATEGORY_PALETTE.length];
+      insertList.run('mig_projects', '<Migrated> Projects', null, sectionColor, null, 9999, 0, 'section', null, null, now, now);
+      const hasArchived = projects.some((p) => archivedIds.has(p.id));
+      if (hasArchived) {
+        insertList.run('mig_projects_archived', 'Archived', null, sectionColor, null, 9999, 0, 'section', 'mig_projects', null, now, now);
+      }
+      if (hasGlobalPrompt) {
+        insertList.run('mig_projects_star', '*', null, sectionColor, null, 0, 0, 'bucket', 'mig_projects', null, now, now);
+        insertItem.run('mig_prompt_global', 'mig_projects_star', globalPrompt, 0, null, null, 0, null, null, null, now, now);
+      }
+      const tasksByProject = new Map();
+      for (const t of tasks) {
+        if (!tasksByProject.has(t.project)) tasksByProject.set(t.project, []);
+        tasksByProject.get(t.project).push(t);
+      }
+      for (const p of projects) {
+        const listId = `mig_${p.id}`;
+        insertList.run(listId, p.name, p.shortname ?? null, p.color ?? null, null, p.sort_order ?? 0, 0, 'bucket',
+          archivedIds.has(p.id) ? 'mig_projects_archived' : 'mig_projects', p.owner_id ?? null, p.created_at, p.updated_at);
+        let topOrder = -2;
+        const promptText = promptByKey.get(p.id);
+        if (typeof promptText === 'string' && promptText.trim() !== '') {
+          insertItem.run(`mig_prompt_${p.id}`, listId, promptText, 0, null, null, topOrder++,
+            null, null, p.owner_id ?? null, p.created_at, p.updated_at);
+        }
+        const infoNote = buildProjectInfoNote(p);
+        if (infoNote) {
+          insertItem.run(`mig_info_${p.id}`, listId, 'Project info', 0, infoNote, null, topOrder++,
+            null, null, p.owner_id ?? null, p.created_at, p.updated_at);
+        }
+        const projectTasks = (tasksByProject.get(p.id) || []).slice()
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        for (const t of projectTasks) {
+          insertItem.run(`mig_${t.id}`, listId, t.text,
+            (t.status === 'approved' || t.status === 'idea-shipped') ? 1 : 0,
+            buildTaskNote(t), null, t.sort_order ?? 0,
+            null, null, t.owner_id ?? null, t.created_at, t.updated_at);
+        }
+      }
+    }
+    db.prepare('DELETE FROM tasks').run();
+    db.prepare('DELETE FROM projects').run();
+    if (hasTable('prompts')) db.prepare('DELETE FROM prompts').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('archived_project_ids', 'show_archived')").run();
+  },
 };

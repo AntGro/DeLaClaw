@@ -378,7 +378,7 @@ async function refreshLists() {
 
 
 // ===================================================================
-// RENDERING — bucket cards (like Projects)
+// RENDERING — bucket cards
 // ===================================================================
 
 function renderLists() {

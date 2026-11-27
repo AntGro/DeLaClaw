@@ -785,7 +785,7 @@ test('welcome quick-add fits on one line at phone widths', () => {
 // elements past 390px), which iOS Safari pans to. display:none keeps
 // them out of layout until .visible restores the grid.
 test('collapsed row actions stay display:grid so the reveal slides smoothly', () => {
-  for (const cls of ['task-actions', 'habit-actions', 'todo-actions', 'birthday-actions', 'list-item-actions']) {
+  for (const cls of ['habit-actions', 'todo-actions', 'birthday-actions', 'list-item-actions']) {
     assert(styleCss.includes(`.${cls}{display:grid;`),
       `${cls} must stay display:grid when collapsed, or the max-width/opacity transition never runs`);
     assert(!styleCss.includes(`.${cls}{display:none;`),
@@ -959,7 +959,7 @@ test('No ondblclick HTML attributes in JS files (use initItemHoverDelay onDblCli
 // 19. Double-click edit: all initItemHoverDelay calls include onDblClick
 // ===================================================================
 test('All initItemHoverDelay calls include onDblClick callback', () => {
-  const pages = ['projects.js', 'todos.js', 'habits.js', 'flashcards.js'];
+  const pages = ['todos.js', 'habits.js', 'flashcards.js'];
   for (const file of pages) {
     const content = jsFiles[file];
     if (!content) continue;
@@ -981,7 +981,6 @@ test('Double-click onDblClick triggers inline edit (not modal) on all pages', ()
   // Each page's onDblClick callback must call an inline edit function, not a modal opener
   // We check that the function called within onDblClick uses inlineEditText (directly or via a wrapper)
   const inlinePages = {
-    'projects.js': { dblClickFn: 'promptEditTask', mustUse: 'inlineEditText' },
     'todos.js': { dblClickFn: 'editTodoInline', mustUse: 'inlineEditText' },
     'habits.js': { dblClickFn: 'editHabitInline', mustUse: 'inlineEditText' },
     'flashcards.js': { dblClickFn: 'editFlashcardInline', mustUse: 'inlineEditText' },
@@ -1007,7 +1006,7 @@ test('Double-click onDblClick triggers inline edit (not modal) on all pages', ()
 // 21. rowSelector must differ from itemSelector (querySelector doesn't match self)
 // ===================================================================
 test('initItemHoverDelay rowSelector differs from itemSelector', () => {
-  const pagesWithHover = ['projects.js', 'todos.js', 'habits.js', 'birthdays.js', 'flashcards.js'];
+  const pagesWithHover = ['todos.js', 'habits.js', 'birthdays.js', 'flashcards.js'];
   for (const file of pagesWithHover) {
     const content = jsFiles[file];
     if (!content) continue;
@@ -1124,14 +1123,6 @@ test('Touch row actions: splitRowActions keeps the first two preferred actions p
   r = splitRowActions(['copy-item-link', 'edit-list-item-inline', 'delete-list-item'], P.list);
   assert(JSON.stringify(r.primary) === '[1]',
     'lists (no attach): Edit alone stays visible');
-
-  // Projects: review task and draft task (promote is the status button)
-  r = splitRowActions(['update-task-status', 'open-revision-modal', 'copy-item-link', 'prompt-edit-task', 'delete-task'], P.task);
-  assert(JSON.stringify(r.primary) === '[0,3]',
-    'projects (review): Approve + Edit stay visible');
-  r = splitRowActions(['update-task-status', 'copy-item-link', 'prompt-edit-task', 'delete-task'], P.task);
-  assert(JSON.stringify(r.primary) === '[0,2]',
-    'projects (draft): Promote + Edit stay visible');
 
   // Memory cards: Edit + Delete, copy link behind the kebab
   r = splitRowActions(['copy-item-link', 'open-edit-flashcard', 'delete-flashcard'], P.card);
@@ -1380,6 +1371,129 @@ test('Chunk scores: migration 2.32.149 adds recent_scores on both backends', asy
     'drive migration must stringify an array-shaped history');
   assert(!('recent_scores' in store.text_line_progress[1]),
     'drive migration must leave rows without scores untouched');
+});
+
+test('Projects removal: migration 2.32.190 moves projects/tasks/prompts into Lists on both backends', async () => {
+  const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+  assert(local.includes("'2.32.190':"),
+    'local-migrations.js: 2.32.190 must carry the projects removal');
+  const drive = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+  assert(drive.includes("'2.32.190':") && drive.includes('mig_projects'),
+    'drive-migrations.js: 2.32.190 must build the <Migrated> Projects section');
+  const { DRIVE_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'drive-migrations.js')).href);
+  const store = {
+    projects: [
+      { id: 'p1', name: 'Alpha', shortname: 'AL', color: '#ef4444', tech: 'React', links: [{ label: 'GitHub', url: 'https://github.com/x/y' }], sort_order: 0, owner_id: 'u1', created_at: '2026-01-01', updated_at: '2026-01-02' },
+      { id: 'p2', name: 'Beta', shortname: null, color: null, tech: null, links: '[]', sort_order: 1, owner_id: 'u1', created_at: '2026-01-01', updated_at: '2026-01-02' },
+    ],
+    tasks: [
+      { id: 't1', project: 'p1', text: 'Do thing', status: 'review', plan_note: 'The plan', hatch_response: 'Done it', context: null, sort_order: 0, owner_id: 'u1' },
+      { id: 't2', project: 'p1', text: 'Approved thing', status: 'approved', plan_note: null, hatch_response: null, context: null, sort_order: 1, owner_id: 'u1' },
+      { id: 't3', project: 'p1', text: 'Shipped idea', status: 'idea-shipped', plan_note: null, hatch_response: null, context: null, sort_order: 2, owner_id: 'u1' },
+      { id: 't4', project: 'p1', text: 'Plain todo', status: 'todo', plan_note: null, hatch_response: null, context: null, sort_order: 3, owner_id: 'u1' },
+      { id: 't5', project: 'p2', text: 'Beta task', status: 'draft', plan_note: null, hatch_response: null, context: null, sort_order: 0, owner_id: 'u1' },
+      { id: 't6', project: 'gone', text: 'Orphan', status: 'todo', plan_note: null, hatch_response: null, context: null, sort_order: 0, owner_id: 'u1' },
+    ],
+    prompts: [
+      { key: 'p1', text: 'Prompt for Alpha' },
+      { key: 'global', text: 'Pickup prompt' },
+    ],
+    lists: [{ id: 'l0', name: 'Existing', color: '#3b82f6', sort_order: 0 }],
+    list_items: [],
+    settings: [
+      { key: 'archived_project_ids', value: JSON.stringify(['p2']) },
+      { key: 'show_archived', value: 'false' },
+      { key: 'schema_version', value: '2.32.189' },
+    ],
+  };
+  await DRIVE_MIGRATIONS['2.32.190'](store);
+  const byId = (rows) => Object.fromEntries(rows.map((r) => [r.id, r]));
+  const lists = byId(store.lists);
+  const items = byId(store.list_items);
+  assert(lists.mig_projects && lists.mig_projects.kind === 'section' && lists.mig_projects.name === '<Migrated> Projects',
+    'drive migration must create the <Migrated> Projects section');
+  assert(lists.mig_projects.color === '#ef4444',
+    'section colour must be the next palette colour after the existing lists');
+  assert(lists.mig_projects_archived && lists.mig_projects_archived.parent_id === 'mig_projects',
+    'archived projects must land in an Archived subsection');
+  assert(lists.mig_p2.parent_id === 'mig_projects_archived' && lists.mig_p1.parent_id === 'mig_projects',
+    'migrated lists must sit under the section (archived ones under its Archived subsection)');
+  assert(items.mig_prompt_global && items.mig_prompt_global.list_id === 'mig_projects_star' && items.mig_prompt_global.text === 'Pickup prompt',
+    'the global task-pickup prompt must become an item in the * list');
+  assert(items.mig_prompt_p1 && items.mig_prompt_p1.list_id === 'mig_p1' && items.mig_prompt_p1.sort_order === -2,
+    'a project prompt must become the top item of its list');
+  assert(items.mig_info_p1 && items.mig_info_p1.note === 'Tech: React\n[GitHub](https://github.com/x/y)',
+    'tech and links must fold into a Project info item note, links as [label](url)');
+  assert(items.mig_t1.checked === 0 && items.mig_t1.note === 'Status: review\nPlan: The plan\nClaw: Done it',
+    'a review task stays unchecked and keeps its status, plan and Claw response in the note');
+  assert(items.mig_t2.checked === 1 && items.mig_t2.note === null,
+    'an approved task becomes a checked item with no status line');
+  assert(items.mig_t3.checked === 1,
+    'an idea-shipped task counts as checked');
+  assert(items.mig_t4.checked === 0 && items.mig_t4.note === null,
+    'a plain todo stays unchecked with an empty note');
+  assert(items.mig_t5.note === 'Status: draft',
+    'a draft task keeps its status in the note');
+  assert(!items.mig_t6,
+    'a task whose project is gone has no list to live in and is dropped');
+  assert(!('projects' in store) && !('tasks' in store) && !('prompts' in store),
+    'drive migration must not leave dead source tables behind');
+  assert(!store.settings.some((s) => s.key === 'archived_project_ids' || s.key === 'show_archived'),
+    'drive migration must drop the project settings rows');
+  assert(store.settings.find((s) => s.key === 'schema_version').value === '2.32.189',
+    'a migration must never touch schema_version itself — the runner owns it');
+  // Local backend: same mapping, against a real SQLite database.
+  let Database;
+  try {
+    ({ Database } = await import('bun:sqlite'));
+  } catch {
+    console.log('  (skip: bun:sqlite unavailable for the local half of 2.32.190)');
+    return;
+  }
+  const { LOCAL_MIGRATIONS } =
+    await import(pathToFileURL(path.join(__dirname, '..', 'migrations', 'local-migrations.js')).href);
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, shortname TEXT, color TEXT, tech TEXT, links TEXT, sort_order INTEGER DEFAULT 0, owner_id TEXT, created_at TEXT, updated_at TEXT)`);
+  db.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, project TEXT, text TEXT NOT NULL, status TEXT, plan_note TEXT, hatch_response TEXT, context TEXT, sort_order INTEGER DEFAULT 0, owner_id TEXT, created_at TEXT, updated_at TEXT)`);
+  db.exec(`CREATE TABLE prompts (key TEXT PRIMARY KEY, text TEXT, owner_id TEXT, updated_at TEXT)`);
+  db.exec(`CREATE TABLE lists (id TEXT PRIMARY KEY, name TEXT NOT NULL, shortname TEXT, color TEXT, icon TEXT, sort_order INTEGER DEFAULT 0, archived INTEGER DEFAULT 0, kind TEXT DEFAULT 'bucket', parent_id TEXT, owner_id TEXT, created_at TEXT, updated_at TEXT)`);
+  db.exec(`CREATE TABLE list_items (id TEXT PRIMARY KEY, list_id TEXT REFERENCES lists(id) ON DELETE CASCADE, text TEXT NOT NULL, checked INTEGER DEFAULT 0, note TEXT, attachments TEXT, sort_order INTEGER DEFAULT 0, shared_id TEXT, shared_group_id TEXT, owner_id TEXT, created_at TEXT, updated_at TEXT)`);
+  db.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, owner_id TEXT, updated_at TEXT)`);
+  db.exec(`INSERT INTO projects VALUES ('p1', 'Alpha', 'AL', '#ef4444', 'React', '[{"label":"GitHub","url":"https://github.com/x/y"}]', 0, 'u1', '2026-01-01', '2026-01-02')`);
+  db.exec(`INSERT INTO projects VALUES ('p2', 'Beta', NULL, NULL, NULL, '[]', 1, 'u1', '2026-01-01', '2026-01-02')`);
+  db.exec(`INSERT INTO tasks VALUES ('t1', 'p1', 'Do thing', 'review', 'The plan', 'Done it', NULL, 0, 'u1', '2026-01-01', '2026-01-02')`);
+  db.exec(`INSERT INTO tasks VALUES ('t2', 'p1', 'Approved thing', 'approved', NULL, NULL, NULL, 1, 'u1', '2026-01-01', '2026-01-02')`);
+  db.exec(`INSERT INTO tasks VALUES ('t3', 'p1', 'Shipped idea', 'idea-shipped', NULL, NULL, NULL, 2, 'u1', '2026-01-01', '2026-01-02')`);
+  db.exec(`INSERT INTO prompts VALUES ('p1', 'Prompt for Alpha', 'u1', '2026-01-02')`);
+  db.exec(`INSERT INTO prompts VALUES ('global', 'Pickup prompt', 'u1', '2026-01-02')`);
+  db.exec(`INSERT INTO lists VALUES ('l0', 'Existing', NULL, '#3b82f6', NULL, 0, 0, 'bucket', NULL, 'u1', '2026-01-01', '2026-01-01')`);
+  db.exec(`INSERT INTO settings VALUES ('archived_project_ids', '["p2"]', 'u1', '2026-01-02')`);
+  db.exec(`INSERT INTO settings VALUES ('schema_version', '2.32.189', 'u1', '2026-01-02')`);
+  LOCAL_MIGRATIONS['2.32.190'](db);
+  const lrows = byId(db.prepare('SELECT * FROM lists').all());
+  const irows = byId(db.prepare('SELECT * FROM list_items').all());
+  assert(lrows.mig_projects && lrows.mig_projects.kind === 'section' && lrows.mig_projects.color === '#ef4444',
+    'local migration must create the section with the next palette colour');
+  assert(lrows.mig_p2.parent_id === 'mig_projects_archived',
+    'local migration must place archived projects under the Archived subsection');
+  assert(irows.mig_prompt_global && irows.mig_prompt_global.list_id === 'mig_projects_star',
+    'local migration must move the global prompt into the * list');
+  assert(irows.mig_info_p1 && irows.mig_info_p1.note === 'Tech: React\n[GitHub](https://github.com/x/y)',
+    'local migration must fold tech and links into the Project info note');
+  assert(irows.mig_t1.checked === 0 && irows.mig_t1.note === 'Status: review\nPlan: The plan\nClaw: Done it',
+    'local migration must keep the review task unchecked with its status, plan and Claw response');
+  assert(irows.mig_t2.checked === 1 && irows.mig_t3.checked === 1,
+    'local migration must check approved and idea-shipped tasks');
+  assert(db.prepare('SELECT COUNT(*) AS n FROM tasks').get().n === 0
+    && db.prepare('SELECT COUNT(*) AS n FROM projects').get().n === 0
+    && db.prepare('SELECT COUNT(*) AS n FROM prompts').get().n === 0,
+    'local migration must delete the source rows');
+  assert(db.prepare("SELECT COUNT(*) AS n FROM settings WHERE key IN ('archived_project_ids', 'show_archived')").get().n === 0,
+    'local migration must drop the project settings rows');
+  assert(db.prepare("SELECT value FROM settings WHERE key = 'schema_version'").get().value === '2.32.189',
+    'local migration must never touch schema_version itself');
+  db.close();
 });
 
 test('Chunk scores: editing a chunk clears its score history with the rest of the revision state', () => {
@@ -3126,7 +3240,6 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
   // Pages that MUST have drag-drop reorder, with expected item selector substring
   const expected = {
     'js/lists.js': '.list-item',
-    'js/projects.js': '.task-item',
     'js/todos.js': '.todo-item',
   };
 
@@ -3138,7 +3251,7 @@ test('All reorderable pages call initItemDragDrop with correct item selectors', 
   }
 
   // idAttr must be camelCase (dataset API), never raw 'data-xxx-yyy'
-  const allFiles = ['js/lists.js', 'js/projects.js', 'js/todos.js'];
+  const allFiles = ['js/lists.js', 'js/todos.js'];
   for (const file of allFiles) {
     const src = fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8');
     const idAttrMatches = src.match(/idAttr:\s*['"]([^'"]+)['"]/g) || [];
@@ -3244,7 +3357,6 @@ test('Drag clones are globally tagged and cleaned before drag-enabled re-renders
   const renderChecks = {
     'lists.js': 'function renderLists',
     'todos.js': 'function renderTodos',
-    'projects.js': 'function buildProjectCards',
   };
   for (const [file, marker] of Object.entries(renderChecks)) {
     const src = jsFiles[file];
@@ -3336,7 +3448,10 @@ test('BACKUP_TABLES covers every schema table except derived/credential tables',
   // (reconcileLedger); agent_grants holds token hashes that must never
   // travel in a backup export. Sharing tables live only on Drive, so they
   // are listed in BACKUP_TABLES although they are not in schema.sql.
-  const excluded = new Set(['gcal_sync', 'agent_grants']);
+  // projects/tasks/prompts are legacy migration-only tables (emptied by
+  // the 2.32.190 Projects removal; they hold no data and are deliberately
+  // left out of backups).
+  const excluded = new Set(['gcal_sync', 'agent_grants', 'projects', 'tasks', 'prompts']);
   const sharingTables = new Set(['sharing_groups', 'sharing_members', 'sharing_items', 'groups']);
   for (const t of schemaTables) {
     if (excluded.has(t)) continue;
@@ -3690,10 +3805,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     assert(sz > 5*1024, `CODEMAP.json suspiciously small: ${sz} bytes`);
   });
 
-  test('CODEMAP features include all 7 core features', () => {
+  test('CODEMAP features include all 6 core features', () => {
     const p = path.join(__dirname, '..', '.agents', 'CODEMAP.json');
     const j = JSON.parse(fs.readFileSync(p, 'utf-8'));
-    const expected = ['todos','habits','projects','birthdays','flashcards','lists','welcome'];
+    const expected = ['todos','habits','birthdays','flashcards','lists','welcome'];
     for (const f of expected) {
       assert(j.features[f], `Missing feature in CODEMAP: ${f}`);
       assert(j.features[f].entry, `${f} missing entry`);
@@ -8572,8 +8687,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     test('delegation: read-only allowlist blocks mutations, keeps navigation', () => {
       assert(delegationSrc.includes('READ_ONLY_ALLOWED') && delegationSrc.includes('function isReadOnly()'),
         'delegation must gate data-actions in read-only mode');
-      assert(delegationSrc.includes("'close-and-open-revision'") ,
-        'the mutating close-and-open-revision action must be explicitly denied despite its close- prefix');
+      // (The old 'close-and-open-revision' exception went with the Projects
+      // removal in 2.32.190 — no live close- action mutates anymore.)
       assert(delegationSrc.includes("isReadOnly() && !readOnlyAllows(action)"),
         'click handler must consult the allowlist before dispatch');
       for (const studyAction of ['start-practice', 'toggle-card', 'rate-card', 'continue-free-practice',
@@ -8965,7 +9080,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       ]) {
         assert(chooser.includes(text), `demo chooser prompt must ask for events in ${lang}`);
       }
-      assert(chooser.includes("['projects', 'tasks', 'todos', 'habits', 'flashcards', 'birthdays', 'events', 'lists', 'list_items']"),
+      assert(chooser.includes("['todos', 'habits', 'flashcards', 'birthdays', 'events', 'lists', 'list_items']"),
         'parseCustomJSON must recognise the events table');
       assert(chooser.includes('wallTimeToInstant(r.date, r.start_time, r.timezone)') && chooser.includes('r.all_day = r.all_day ? 1 : 0'),
         'normalizeCustomData must convert LLM event times to UTC instants and coerce all_day to 0/1');

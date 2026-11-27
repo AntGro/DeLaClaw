@@ -95,7 +95,7 @@ These **must stay in sync**. The `draft` status bug (v1.105) was caused by the d
 | **Storage limits** | Free tier: 15 GB shared across Gmail/Drive/Photos. DeLaClaw JSON typically < 1 MB | SQLite limit: ~281 TB. Effectively unlimited | N/A |
 | **Security** | Inherits Google account security. `drive.file` scope → no access to user's other Drive files. `calendar.app.created` scope → no access to user's other calendars | No auth, no encryption at rest. Trusted local networks only. **TODO:** bind to `127.0.0.1`; add optional auth token | N/A |
 | **Setup** | Click "Connect with Google" → authorize → folder and data file created automatically | `cd server && bun run server.js`. Enter `http://localhost:3737` in login form | Click "Demo" on login screen, choose a sample dataset or start empty |
-| **Purpose** | Primary persistent backend — no database, no API keys, just a Google account. Optional Calendar sync projects habits, TODOs, birthdays, and events to a dedicated Google Calendar | Self-hosted option for privacy-conscious users on trusted networks | Try DeLaClaw without any backend. Also serves as the Drive adapter's query engine |
+| **Purpose** | Primary persistent backend — no database, no API keys, just a Google account. Optional Calendar sync sends habits, TODOs, birthdays, and events to a dedicated Google Calendar | Self-hosted option for privacy-conscious users on trusted networks | Try DeLaClaw without any backend. Also serves as the Drive adapter's query engine |
 
 ### Drive folder naming — production vs preview builds
 
@@ -248,7 +248,6 @@ The agent interacts with DeLaClaw via the Google Drive API, reading and writing 
 - **Task pickup:** the Heartbeat fetches `status=todo` and `status=revision` tasks from the agent task queue, works on them, sets `status=review` with `hatch_response`.
 - **Flashcard proposals:** Heartbeat fetches `proposal_status=pending` drafts, generates Q/A pairs, sets `proposal_status=ready`.
 - **Habit `next_due`:** Heartbeat computes `next_due` for free-text frequency rules.
-- **Prompts:** Reads global + per-project prompts from the `prompts` table for task context.
 
 ### Conflict handling
 
@@ -294,8 +293,6 @@ The agent interacts with DeLaClaw via the Google Drive API, reading and writing 
 ```json
 {
   "_meta": { "version": 1, "exported_at": "...", "tables": [...] },
-  "projects": [...],
-  "tasks": [...],
   ...
 }
 ```
@@ -383,12 +380,10 @@ Tables tracked in `BACKUP_TABLES` (import order):
 | `todo_categories` | TODO category containers | — |
 | `habit_categories` | Habit category containers | — |
 | `flashcard_decks` | Flashcard deck containers | — |
-| `projects` | Project cards | — |
 | `habits` | Habit definitions | — |
 | `texts` | Long-form texts | — |
 | `lists` | User-created lists | — |
 | `todos` | TODO items | `todo_categories.id` |
-| `tasks` | Project tasks | `projects.id` |
 | `habit_completions` | Habit check-ins | `habits.id` |
 | `flashcards` | Flashcard Q/A pairs | `flashcard_decks.id` |
 | `flashcard_notes` | Draft flashcard proposals | — |
@@ -397,7 +392,6 @@ Tables tracked in `BACKUP_TABLES` (import order):
 | `events` | Calendar events | — |
 | `list_items` | Items within lists | `lists.id` |
 | `settings` | App settings (key/value) | — |
-| `prompts` | AI prompts (global + per-project) | — |
 | `daily_visits` | Visit statistics (active days, streaks) | — |
 | `sharing_groups` | Shared group definitions | — |
 | `sharing_members` | Group membership | `sharing_groups.id` |

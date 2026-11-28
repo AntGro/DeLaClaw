@@ -837,6 +837,14 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
   // Per-item attachments subfolders, by folder key (shared_id for shared
   // items, local id otherwise) — resolved lazily, then cached.
   const itemAttachmentsFolderIds = new Map();
+  // Folder keys known to have no per-item folder, and whether the parent
+  // attachments folder is known absent — a miss is cached per session so
+  // a big batch delete doesn't re-search Drive for every folder-less
+  // item (v2.32.198). Both are invalidated the moment a folder is
+  // created (upload) or found, so a folder created later in the session
+  // is never skipped.
+  const missingItemAttachmentsFolders = new Set();
+  let attachmentsFolderMissing = false;
   // Names claimed by uploads still in flight, by Drive folder id — so
   // two uploads racing the same folder can't take the same name.
   const claimedAttachmentNames = new Map();
@@ -1774,6 +1782,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
       const tok = await getToken();
       if (!tok) throw new Error('No valid token — please sign in again');
       if (!attachmentsFolderId) attachmentsFolderId = await findOrCreateAttachmentsFolder(tok, folderId);
+      attachmentsFolderMissing = false; // the parent now exists
       // Per-item folder (cached); without an item key the upload lands in
       // the flat folder, as before.
       let targetFolderId = attachmentsFolderId;
@@ -1782,6 +1791,7 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         if (!targetFolderId) {
           targetFolderId = await findOrCreateItemAttachmentsFolder(tok, itemId, attachmentsFolderId);
           itemAttachmentsFolderIds.set(itemId, targetFolderId);
+          missingItemAttachmentsFolders.delete(itemId); // the folder now exists
         }
       }
       // listFolderFiles caps at 100 — past that a duplicate name is
@@ -1823,11 +1833,20 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
         const tok = await getToken();
         if (!tok) return false;
         // Find-only: never create the parent folder just to look for a child.
-        if (!attachmentsFolderId) attachmentsFolderId = await findAttachmentsFolder(tok, folderId);
-        if (!attachmentsFolderId) return false;
+        // A known-absent parent or per-item folder is not re-searched: the
+        // miss is cached per session (see the declarations above), so a
+        // batch delete over folder-less items costs one search per key.
+        if (!attachmentsFolderId) {
+          if (attachmentsFolderMissing) return false;
+          attachmentsFolderId = await findAttachmentsFolder(tok, folderId);
+          if (!attachmentsFolderId) { attachmentsFolderMissing = true; return false; }
+        }
         let itemFolderId = itemAttachmentsFolderIds.get(itemId);
-        if (!itemFolderId) itemFolderId = await findItemAttachmentsFolder(tok, itemId, attachmentsFolderId);
-        if (!itemFolderId) return false;
+        if (!itemFolderId) {
+          if (missingItemAttachmentsFolders.has(itemId)) return false;
+          itemFolderId = await findItemAttachmentsFolder(tok, itemId, attachmentsFolderId);
+          if (!itemFolderId) { missingItemAttachmentsFolders.add(itemId); return false; }
+        }
         itemAttachmentsFolderIds.delete(itemId);
         claimedAttachmentNames.delete(itemFolderId);
         const { trashFileIds, trashFolder } = folderTrashPlan(await listFolderFiles(tok, itemFolderId).catch(() => []), referencedIds);
@@ -1835,7 +1854,9 @@ export async function createDriveAdapter(clientId, onStatus, { silent = false } 
           try { await trashDriveFile(tok, fid); } catch {}
         }
         if (!trashFolder) return false;
-        return await trashDriveFile(tok, itemFolderId);
+        const trashed = await trashDriveFile(tok, itemFolderId);
+        if (trashed) missingItemAttachmentsFolders.add(itemId);
+        return trashed;
       } catch { return false; }
     },
     /** Trash an attachment file from Drive. Best-effort, returns false on failure. */

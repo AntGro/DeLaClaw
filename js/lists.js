@@ -5,7 +5,7 @@ import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTre
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, snapshotRows, animateRowsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
-import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, batchExcludeKeys, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
+import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, trashBatchItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
 
 // ===================================================================
 // LISTS — GENERIC USER-CREATED LISTS (bucket-card layout)
@@ -1298,17 +1298,12 @@ async function deleteList(listId) {
       if (itemCount > 0) await state.db.from('list_items').delete().eq('list_id', listId);
       const { error } = await state.db.from('lists').delete().eq('id', listId);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
-      // Deleting a list is deleting each of its items: trash my own
-      // attachments on every item, like deleteListItem does. Best-effort.
-      // Exclude the whole batch from the reference check: every item in
-      // this list is being deleted, so none of them counts as a surviving
-      // reference to another's file.
-      const excludeKeys = batchExcludeKeys(items);
-      for (const item of items) {
-        try { await trashOwnItemAttachments(item, state.allListItems, excludeKeys); } catch {}
-      }
       showToast(t('toast.removed'), 'info');
       await refreshLists();
+      // Attachment cleanup runs unawaited after the refresh (v2.32.198):
+      // deleting a list is deleting each of its items, and the reference
+      // set is computed once for the batch.
+      trashBatchItemAttachments(items, state.allListItems).catch(e => console.warn('Failed to trash batch attachments:', e));
       // Delete shared items from Drive in the background (sequential, etag
       // order). A failure restores the list and its items locally.
       if (state.sharing) {
@@ -1427,15 +1422,11 @@ async function deleteListSectionSubtree() {
   for (const bid of bucketIds) await state.db.from('list_items').delete().eq('list_id', bid);
   for (const bid of bucketIds) await state.db.from('lists').delete().eq('id', bid);
   for (const sid of sectionIds) await state.db.from('lists').delete().eq('id', sid);
-  // Same as deleting each list: trash my own attachments on every item
-  // in the subtree. Best-effort. Exclude the whole subtree from the
-  // reference check — every item in it is being deleted.
-  const excludeKeys = batchExcludeKeys(itemRows);
-  for (const item of itemRows) {
-    try { await trashOwnItemAttachments(item, state.allListItems, excludeKeys); } catch {}
-  }
   showToast(t('toast.deleted'), 'info');
   await refreshLists();
+  // Attachment cleanup runs unawaited after the refresh (v2.32.198) —
+  // see deleteList: reference set once for the subtree.
+  trashBatchItemAttachments(itemRows, state.allListItems).catch(e => console.warn('Failed to trash batch attachments:', e));
   if (state.sharing) {
     const sharedItems = itemRows.filter(i => i.shared_id && i.shared_group_id);
     if (sharedItems.length) {
@@ -1825,8 +1816,8 @@ async function bulkShareList(listId, el) {
             // Files first, payload second — same as the single-item share.
             // A file-share failure skips this item (it stays personal);
             // the partial grant is rolled back inside
-            // shareAttachmentsWithGroup. The final toast reports the
-            // partial share.
+            // shareAttachmentsWithGroup. The final toast counts the
+            // skipped items in its total (shared N of M).
             const shareResult = attachments.length
               ? await shareAttachmentsWithGroup(groupId, attachments)
               : { ok: true, granted: [] };
@@ -1888,9 +1879,14 @@ async function bulkShareList(listId, el) {
             }
           }
           await refreshLists();
-          if (ok === staged.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
-          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, staged.length), 'error');
+          // The total is every item attempted, not just the staged ones:
+          // items skipped at grant, staging or pointer time still count,
+          // so a partial run never reports "N of N" while items silently
+          // stayed personal — and an all-skipped run still gets a toast.
+          if (ok === listItems.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
+          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, listItems.length), 'error');
           else if (staged.length > 0) showToast(t('toast.failed_to_add'), 'error');
+          else showToast(t('sharing.share_all_partial', 0, listItems.length), 'error');
         } finally {
           _bulkShareInProgress.delete(listId);
           if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }

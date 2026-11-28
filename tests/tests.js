@@ -10380,20 +10380,34 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(stillReferenced.has('f1') && stillReferenced.has('f2'), 'prefixed keys must not exclude anything (the bug this fixes)');
     });
 
-    test('batch deletes build exclusion keys with batchExcludeKeys everywhere', () => {
+    test('batch deletes run one unawaited cleanup after the refresh', () => {
       const todosSrc = jsFiles['todos.js'];
       const habitsSrc = jsFiles['habits.js'];
       const listsSrc = jsFiles['lists.js'];
-      assert(todosSrc.includes('batchExcludeKeys(doneTodos)'), 'clear-done must exclude the done batch by raw keys');
-      assert(todosSrc.includes('batchExcludeKeys(todosInCat)'), 'TODO category delete must exclude the category batch by raw keys');
-      assert(todosSrc.includes('batchExcludeKeys(itemRows)'), 'TODO section delete must exclude the subtree batch by raw keys');
-      assert(habitsSrc.includes('batchExcludeKeys(habitsInCat)'), 'habit category delete must exclude the category batch by raw keys');
-      assert(habitsSrc.includes('batchExcludeKeys(itemRows)'), 'habit section delete must exclude the subtree batch by raw keys');
-      assert(listsSrc.includes('batchExcludeKeys(items)'), 'list delete must exclude the list batch by raw keys');
-      assert(listsSrc.includes('batchExcludeKeys(itemRows)'), 'list section delete must exclude the subtree batch by raw keys');
+      const sites = [
+        ['todos.js', todosSrc, 'deleteAllDoneTodos', 'trashBatchItemAttachments(doneTodos, allTodos)'],
+        ['todos.js', todosSrc, 'deleteCategory', 'trashBatchItemAttachments(todosInCat, allTodos)'],
+        ['todos.js', todosSrc, 'deleteSectionSubtree', 'trashBatchItemAttachments(itemRows, allTodos)'],
+        ['habits.js', habitsSrc, 'deleteHabitCategory', 'trashBatchItemAttachments(habitsInCat, state.allHabits)'],
+        ['habits.js', habitsSrc, 'deleteHabitSectionSubtree', 'trashBatchItemAttachments(itemRows, state.allHabits)'],
+        ['lists.js', listsSrc, 'deleteList', 'trashBatchItemAttachments(items, state.allListItems)'],
+        ['lists.js', listsSrc, 'deleteListSectionSubtree', 'trashBatchItemAttachments(itemRows, state.allListItems)'],
+      ];
+      for (const [name, src, fnName, call] of sites) {
+        const start = src.indexOf(`async function ${fnName}(`);
+        assert(start !== -1, `${name}: ${fnName} not found`);
+        const end = src.indexOf('\n}\n', start);
+        const fn = src.slice(start, end);
+        assert(fn.includes(call), `${name}: ${fnName} must clean up the batch via ${call}`);
+        assert(fn.indexOf(call) > fn.indexOf('await refresh'), `${name}: ${fnName} must run the cleanup after the refresh, not before the toast`);
+        assert(!fn.includes('await trashOwnItemAttachments'), `${name}: ${fnName} must not await the per-item trash before the refresh`);
+      }
       for (const [name, src] of [['todos.js', todosSrc], ['habits.js', habitsSrc], ['lists.js', listsSrc]]) {
         assert(!src.includes('todos:${') && !src.includes('habits:${'), `${name} must not build prefixed exclusion keys`);
       }
+      // Only the three single-item deletes still await the trash.
+      const awaited = [todosSrc, habitsSrc, listsSrc].map(s => (s.match(/await trashOwnItemAttachments/g) || []).length);
+      assert(JSON.stringify(awaited) === JSON.stringify([1, 1, 1]), 'exactly one awaited trash per view (the single-item delete) must remain');
     });
 
     test('attachments: processQueue saves onto the live item, not the held one', async () => {
@@ -10519,6 +10533,180 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(attSrc.includes('live.attachments = next;'), 'both in-memory writes must land on the live object');
     });
 
+    test('attachments: trashBatchItemAttachments computes the reference set once', async () => {
+      const attJs = jsFiles['attachments.js'];
+      const start = attJs.indexOf('// ── Pure attachment helpers ──');
+      const end = attJs.indexOf('\nexport {');
+      const loadTrash = new Function('state', 'document', 'showToast', 'showConfirmAction', 't',
+        `${attJs.slice(start, end)}; return { trashBatchItemAttachments, trashOwnItemAttachments };`);
+      const rec = (id) => ({ drive_file_id: id, name: `${id}.pdf`, size: 1, url: `https://x/${id}`, uploaded_by: 'me' });
+      const itemA = { id: 'a', attachments: [rec('f1'), rec('f2')] };
+      const itemB = { id: 'b', attachments: [rec('f2'), rec('f3')] };
+      const itemC = { id: 'c', attachments: [rec('f4')] };
+      const survivor = { id: 's', attachments: [rec('f3')] };
+      let sharedScans = 0;
+      const trashedFiles = [];
+      const trashedFolders = [];
+      const fakeState = {
+        driveAdapter: {
+          trashAttachmentFile: async (id) => { trashedFiles.push(id); },
+          trashItemAttachmentsFolder: async (key, referenced) => { trashedFolders.push({ key, referenced }); },
+        },
+        sharing: {
+          getCurrentUserMemberId: async () => 'me',
+          getAllSharedItems: () => { sharedScans++; return []; },
+        },
+      };
+      const { trashBatchItemAttachments, trashOwnItemAttachments } = loadTrash(fakeState, {}, () => {}, () => {}, (k) => k);
+      await trashBatchItemAttachments([itemA, itemB, itemC], [itemA, itemB, itemC, survivor]);
+      assert(sharedScans === 1, 'the shared scan must run once for the batch, not once per item');
+      assert(JSON.stringify([...new Set(trashedFiles)].sort()) === JSON.stringify(['f1', 'f2', 'f4']),
+        'the batch files must be trashed and the survivor-referenced file spared');
+      assert(!trashedFiles.includes('f3'), 'a file the survivor still references must never be trashed');
+      assert(trashedFolders.length === 3, 'each batch item folder must be visited once');
+      assert(trashedFolders.every(f => f.referenced.has('f3') && !f.referenced.has('f1')),
+        'every folder trash must see the same once-computed reference set');
+      // The precomputed path skips the scan entirely.
+      sharedScans = 0;
+      const trashed2 = [];
+      fakeState.driveAdapter.trashAttachmentFile = async (id) => { trashed2.push(id); };
+      await trashOwnItemAttachments(itemA, [itemA, survivor], null, new Set(['f1']));
+      assert(sharedScans === 0, 'a precomputed reference set must not rescan the shared items');
+      assert(JSON.stringify(trashed2) === JSON.stringify(['f2']), 'the precomputed set must spare f1 and trash f2');
+    });
+
+    test('attachments: cancelling during the group share drops the pending chip', async () => {
+      const loadQueue = loadAttachmentQueue();
+      const recB = { drive_file_id: 'f-B', name: 'b.pdf', size: 1, url: 'https://x/b', uploaded_by: 'me' };
+      const item = { id: 'todo-1', shared_id: 'sh-1', shared_group_id: 'g-1', attachments: [] };
+      let shareResolve;
+      const revoked = [];
+      let renders = 0;
+      const fakeFile = { name: 'b.pdf', size: 1 };
+      const fakeInput = { type: '', multiple: false, className: '', style: {}, files: [fakeFile],
+        click() { if (this.onchange) this.onchange(); }, remove() {}, onchange: null };
+      const fakeState = {
+        driveAdapter: { uploadAttachment: async () => recB },
+        sharing: {
+          getCurrentMemberId: async () => 'me',
+          getCurrentUserMemberId: async () => 'me',
+          shareFileWithGroup: async () => new Promise(r => { shareResolve = r; }),
+          revokeFileWithGroup: async (groupId, fileId, memberIds) => { revoked.push({ groupId, fileId, memberIds }); },
+        },
+      };
+      const fakeDocument = { createElement: () => fakeInput, body: { appendChild: () => {} }, querySelector: () => null };
+      const saves = [];
+      const { createAttachmentQueue } = loadQueue(fakeState, fakeDocument, () => {}, () => {}, (k) => k);
+      const queue = createAttachmentQueue({
+        getItem: (id) => (id === 'todo-1' ? item : undefined),
+        getLocalItems: () => [item],
+        saveAttachments: async (i, next) => { saves.push({ item: i, next }); },
+        render: () => { renders++; },
+        actions: {},
+        i18nPrefix: 'todos',
+      });
+      queue.attach('todo-1');
+      let entry;
+      for (let i = 0; i < 100; i++) {
+        entry = queue.pendingFor('todo-1')[0];
+        if (entry && entry.status === 'sharing') break;
+        await new Promise(r => setTimeout(r, 10));
+      }
+      assert(entry && entry.status === 'sharing', 'the queue must be awaiting the group share before the cancel');
+      queue.cancel('todo-1', entry.id);
+      assert(queue.pendingFor('todo-1')[0].status === 'cancelled', 'cancel must mark the entry cancelled');
+      shareResolve(['member-x']);
+      for (let i = 0; i < 100 && queue.pendingFor('todo-1').length > 0; i++) await new Promise(r => setTimeout(r, 10));
+      assert(queue.pendingFor('todo-1').length === 0, 'the cancelled entry must leave the pending map once the share settles');
+      assert(renders > 0, 'the chip must re-render away after the cancel');
+      assert(saves.length === 0, 'a cancelled attach must not save a record');
+      assert(revoked.length === 1 && revoked[0].fileId === 'f-B', 'the grant issued for the cancelled file must be rolled back');
+    });
+
+    test('attachments: cancelling during the upload drops the pending chip when it resolves', async () => {
+      const loadQueue = loadAttachmentQueue();
+      const recB = { drive_file_id: 'f-B', name: 'b.pdf', size: 1, url: 'https://x/b', uploaded_by: 'me' };
+      const item = { id: 'todo-1', attachments: [] };
+      let uploadResolve;
+      let renders = 0;
+      const fakeFile = { name: 'b.pdf', size: 1 };
+      const fakeInput = { type: '', multiple: false, className: '', style: {}, files: [fakeFile],
+        click() { if (this.onchange) this.onchange(); }, remove() {}, onchange: null };
+      const fakeState = {
+        driveAdapter: { uploadAttachment: async () => new Promise(r => { uploadResolve = r; }) },
+        sharing: { getCurrentUserMemberId: async () => 'me' },
+      };
+      const fakeDocument = { createElement: () => fakeInput, body: { appendChild: () => {} }, querySelector: () => null };
+      const saves = [];
+      const { createAttachmentQueue } = loadQueue(fakeState, fakeDocument, () => {}, () => {}, (k) => k);
+      const queue = createAttachmentQueue({
+        getItem: (id) => (id === 'todo-1' ? item : undefined),
+        getLocalItems: () => [item],
+        saveAttachments: async (i, next) => { saves.push({ item: i, next }); },
+        render: () => { renders++; },
+        actions: {},
+        i18nPrefix: 'todos',
+      });
+      queue.attach('todo-1');
+      let entry;
+      for (let i = 0; i < 100; i++) {
+        entry = queue.pendingFor('todo-1')[0];
+        if (entry && entry.status === 'uploading') break;
+        await new Promise(r => setTimeout(r, 10));
+      }
+      assert(entry && entry.status === 'uploading', 'the queue must be uploading before the cancel');
+      queue.cancel('todo-1', entry.id);
+      // The fake upload ignores the abort signal, so it stays pending until resolved.
+      uploadResolve(recB);
+      for (let i = 0; i < 100 && queue.pendingFor('todo-1').length > 0; i++) await new Promise(r => setTimeout(r, 10));
+      assert(queue.pendingFor('todo-1').length === 0, 'the cancelled entry must leave the pending map once the upload resolves');
+      assert(saves.length === 0, 'a cancelled upload must not save a record');
+      assert(renders > 0, 'the chip must re-render away after the cancel');
+    });
+
+    test('attachments: drive adapter caches missing attachment folders per session', () => {
+      const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
+      assert(driveSrc.includes('const missingItemAttachmentsFolders = new Set();'), 'the adapter must keep a per-session set of missing per-item folders');
+      assert(driveSrc.includes('let attachmentsFolderMissing = false;'), 'the adapter must keep a per-session flag for a missing parent folder');
+      assert(driveSrc.includes('if (missingItemAttachmentsFolders.has(itemId)) return false;'), 'a known-missing per-item folder must not be re-searched');
+      assert(driveSrc.includes('if (attachmentsFolderMissing) return false;'), 'a known-missing parent folder must not be re-searched');
+      assert(driveSrc.includes('missingItemAttachmentsFolders.add(itemId);'), 'a folder lookup that misses must join the negative cache');
+      assert(driveSrc.includes('missingItemAttachmentsFolders.delete(itemId);'), 'creating a per-item folder must invalidate its negative entry');
+      assert(driveSrc.includes('attachmentsFolderMissing = false;'), 'creating the parent folder must invalidate its negative flag');
+      assert(driveSrc.includes('if (trashed) missingItemAttachmentsFolders.add(itemId);'), 'a trashed folder must join the negative cache');
+    });
+
+    test('attachments: bulk-share toasts count skipped items in the total', () => {
+      for (const [name, src, total] of [['todos.js', jsFiles['todos.js'], 'items.length'], ['habits.js', jsFiles['habits.js'], 'items.length'], ['lists.js', jsFiles['lists.js'], 'listItems.length']]) {
+        assert(src.includes(`if (ok === ${total} && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');`),
+          `${name}: the done toast must compare against every item attempted, not just the staged ones`);
+        assert(src.includes(`showToast(t('sharing.share_all_partial', ok, ${total}), 'error');`),
+          `${name}: the partial toast must report against every item attempted`);
+        assert(src.includes(`showToast(t('sharing.share_all_partial', 0, ${total}), 'error');`),
+          `${name}: an all-skipped run must still get a toast`);
+        assert(!src.includes(`showToast(t('sharing.share_all_partial', ok, staged.length), 'error');`),
+          `${name}: no toast may report against staged.length any more`);
+      }
+      assert(jsFiles['lists.js'].includes('The final toast counts the'), 'the lists comment must state the toast counts the skipped items');
+    });
+
+    test('attachments: remove confirm is translated and Welcome chips sit before the meta', () => {
+      const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      assert((i18nSrc.match(/remove_attachment_confirm:/g) || []).length === 9, 'the remove confirm must be defined in all 3 locales x 3 namespaces');
+      const attSrc = jsFiles['attachments.js'];
+      assert(attSrc.includes('t(`${i18nPrefix}.remove_attachment_confirm`, target.name)'), 'remove() must ask through the translated key');
+      assert(!attSrc.includes('Remove "${'), 'no hardcoded English remove confirm may remain');
+      assert(!jsFiles['todos.js'].includes('{ error } = await state.sharing.updateItem'), 'the dead destructure in saveTodoAttachments must stay gone');
+      assert(jsFiles['todos.js'].includes('canAttach && !td.done'), 'Attach must not render on done TODOs, like Share/Unshare/Copy');
+      const welcomeSrc = jsFiles['welcome.js'];
+      const todoStart = welcomeSrc.indexOf('function renderFocusTodoItem');
+      const todoFn = welcomeSrc.slice(todoStart, welcomeSrc.indexOf('\n}\n', todoStart));
+      assert(todoFn.indexOf('attachmentsHtml(td,') !== -1 && todoFn.indexOf('attachmentsHtml(td,') < todoFn.indexOf('todo-meta'), 'Welcome focus TODO chips must come before the meta, like the TODOs page');
+      const habitStart = welcomeSrc.indexOf('function renderFocusHabitItem');
+      const habitFn = welcomeSrc.slice(habitStart, welcomeSrc.indexOf('\n}\n', habitStart));
+      assert(habitFn.indexOf('attachmentsHtml(habit,') !== -1 && habitFn.indexOf('attachmentsHtml(habit,') < habitFn.indexOf('habit-meta'), 'Welcome focus habit chips must come before the meta, like the Habits page');
+    });
+
     test('sharing: folderTrashPlan spares referenced files and keeps the folder when one remains', () => {
       const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
       const start = driveSrc.indexOf('function folderTrashPlan');
@@ -10556,12 +10744,12 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const listStart = listsSrc.indexOf('async function deleteList(');
       const listEnd = listsSrc.indexOf('\n}\n', listStart);
       const listFn = listsSrc.slice(listStart, listEnd);
-      assert(listFn.includes('await trashOwnItemAttachments(item, state.allListItems, excludeKeys)'),
+      assert(listFn.includes('trashBatchItemAttachments(items, state.allListItems)'),
         'deleting a list must exclude the whole batch from the reference check');
       const secStart = listsSrc.indexOf('async function deleteListSectionSubtree');
       const secEnd = listsSrc.indexOf('\n}\n', secStart);
       const secFn = listsSrc.slice(secStart, secEnd);
-      assert(secFn.includes('await trashOwnItemAttachments(item, state.allListItems, excludeKeys)'),
+      assert(secFn.includes('trashBatchItemAttachments(itemRows, state.allListItems)'),
         'deleting a section must exclude the whole subtree from the reference check');
     });
 
@@ -10742,12 +10930,12 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const listStart = listsSrc.indexOf('async function deleteList(');
       const listEnd = listsSrc.indexOf('\n}\n', listStart);
       const listFn = listsSrc.slice(listStart, listEnd);
-      assert(listFn.includes('for (const item of items)') && listFn.includes('await trashOwnItemAttachments(item, state.allListItems, excludeKeys)'),
+      assert(listFn.includes('trashBatchItemAttachments(items, state.allListItems)'),
         'deleting a list must trash my own attachments on every item in it');
       const secStart = listsSrc.indexOf('async function deleteListSectionSubtree');
       const secEnd = listsSrc.indexOf('\n}\n', secStart);
       const secFn = listsSrc.slice(secStart, secEnd);
-      assert(secFn.includes('for (const item of itemRows)') && secFn.includes('await trashOwnItemAttachments(item, state.allListItems, excludeKeys)'),
+      assert(secFn.includes('trashBatchItemAttachments(itemRows, state.allListItems)'),
         'deleting a section must trash my own attachments on every item in the subtree');
     });
 

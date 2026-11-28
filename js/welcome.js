@@ -273,8 +273,8 @@ function renderFocusTodoItem(td) {
         <button data-action="welcome-delete-todo" data-todo-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
       </div>
     </div>
-    ${dueDateStr || snoozeInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}</div>` : ''}
     ${attachmentsHtml(td, { removable: false, i18nPrefix: 'todos' })}
+    ${dueDateStr || snoozeInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}</div>` : ''}
   </div>`;
 }
 
@@ -360,11 +360,11 @@ function renderFocusHabitItem(habit) {
         <button data-action="welcome-delete-habit" data-habit-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2", 16)}</button>
       </div>
     </div>
+    ${attachmentsHtml(habit, { removable: false, i18nPrefix: 'habits' })}
     <div class="habit-meta">
       ${dueHtml}
       ${!habit.is_draft ? `<span class="habit-last-done habit-last-done-editable" data-action="edit-habit-last-done" data-id="${esc(habit.id)}" title="${t('habits.click_to_edit_last_done')}">${lastDoneStr}</span>` : ''}
     </div>
-    ${attachmentsHtml(habit, { removable: false, i18nPrefix: 'habits' })}
   </div>`;
 }
 

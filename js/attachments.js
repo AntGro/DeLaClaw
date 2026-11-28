@@ -157,9 +157,9 @@ function attachmentUploaderName(item, uploadedBy) {
 // copy-to-personal carry the records as-is. excludeKeys is the set of
 // item keys (local ids and shared ids) whose references don't count —
 // the item(s) being deleted. Defaults to this item's own keys.
-async function trashOwnItemAttachments(item, localItems, excludeKeys = null) {
+async function trashOwnItemAttachments(item, localItems, excludeKeys = null, precomputedReferenced = null) {
   const exclude = excludeKeys || new Set([item.id, item.shared_id].filter(Boolean));
-  const referenced = referencedAttachmentFileIds(localItems, exclude);
+  const referenced = precomputedReferenced || referencedAttachmentFileIds(localItems, exclude);
   for (const a of ownAttachmentFiles(item.attachments, await myAttachmentUploaderId(item))) {
     if (referenced.has(a.drive_file_id)) continue;
     try { await state.driveAdapter?.trashAttachmentFile?.(a.drive_file_id); } catch {}
@@ -170,6 +170,20 @@ async function trashOwnItemAttachments(item, localItems, excludeKeys = null) {
   // another member's folder for the same item lives in their Drive.
   // The adapter spares every file in it that another item still references.
   try { await state.driveAdapter?.trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced); } catch {}
+}
+
+// Batch trash (clear-done, category and section deletes): the reference
+// set is computed once for the whole batch — every item shares the same
+// exclusion — instead of once per item, and the caller runs this
+// unawaited after the refresh, so a big batch never blocks the toast.
+// The items are the pre-delete snapshots; their records are what the
+// trash needs, and the refresh has already replaced the live objects.
+async function trashBatchItemAttachments(items, localItems) {
+  const excludeKeys = batchExcludeKeys(items);
+  const referenced = referencedAttachmentFileIds(localItems, excludeKeys);
+  for (const item of items) {
+    try { await trashOwnItemAttachments(item, localItems, excludeKeys, referenced); } catch {}
+  }
 }
 
 // Share each attached file with the group BEFORE the payload goes out —
@@ -369,8 +383,10 @@ function createAttachmentQueue({ getItem, getLocalItems, saveAttachments, render
             },
           });
           // Cancelled while the upload or the share below was awaiting —
-          // the file is in Drive, unlinked; drop it silently.
-          if (entry.status === 'cancelled') continue;
+          // the file is in Drive, unlinked; drop it silently — and drop
+          // the chip: without the delete the entry stays in the pending
+          // map and renders until dismissed or reload (ghost chip).
+          if (entry.status === 'cancelled') { pending.delete(entry.id); render(); continue; }
           entry.progress = 1;
           // Shared → the file must be readable by the other members before
           // the link reaches them through the payload. A share failure
@@ -393,6 +409,8 @@ function createAttachmentQueue({ getItem, getLocalItems, saveAttachments, render
             }
             if (entry.status === 'cancelled') {
               if (grantedIds.length) await rollbackAttachmentGrants(item.shared_group_id, [{ fileId: record.drive_file_id, memberIds: grantedIds }]);
+              pending.delete(entry.id);
+              render();
               continue;
             }
           }
@@ -479,7 +497,7 @@ function createAttachmentQueue({ getItem, getLocalItems, saveAttachments, render
     if (!target) return;
     showConfirmAction(
       t('common.delete'),
-      `Remove "${target.name}"?`,
+      t(`${i18nPrefix}.remove_attachment_confirm`, target.name),
       async () => {
         // Re-resolve: the item may have been replaced by a refresh, or
         // gained a record from a finished upload, between the tap and
@@ -529,6 +547,6 @@ export {
   normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl,
   ownAttachmentFiles, referencedFileIdsFromItems, batchExcludeKeys, memberDisplayName,
   myAttachmentUploaderId, referencedAttachmentFileIds, attachmentUploaderName,
-  trashOwnItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants,
+  trashOwnItemAttachments, trashBatchItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants,
   attachmentsHtml, createAttachmentQueue,
 };

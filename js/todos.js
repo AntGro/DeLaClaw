@@ -6,7 +6,7 @@ import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTre
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
-import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, batchExcludeKeys, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
+import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, trashBatchItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
 
 // ===================================================================
 // TODOS — DATA & CRUD (Category Card Layout)
@@ -716,7 +716,7 @@ function renderTodoItem(td) {
         ${!isShared && !td.done && state.sharing ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !td.done && _myCreatedSharedIds.has(td.shared_id) ? `<button data-action="unshare-todo" data-id="${esc(td.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !td.done && !_myCreatedSharedIds.has(td.shared_id) ? `<button data-action="copy-todo-to-personal" data-id="${esc(td.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
-        ${canAttach ? `<button data-action="attach-to-todo" data-id="${esc(td.id)}" title="${t('todos.attach_file')}" aria-label="${t('todos.attach_file')}">${lucideIcon("paperclip",16)}</button>` : ''}
+        ${canAttach && !td.done ? `<button data-action="attach-to-todo" data-id="${esc(td.id)}" title="${t('todos.attach_file')}" aria-label="${t('todos.attach_file')}">${lucideIcon("paperclip",16)}</button>` : ''}
         <button data-action="copy-item-link" data-link-type="todo" data-id="${esc(td.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link",16)}</button>
         <button data-action="edit-todo-inline" data-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
@@ -1169,14 +1169,6 @@ async function deleteAllDoneTodos(catId) {
         if (td.shared_id && td.shared_group_id) pointerRows.push({ ...td });
         await state.db.from('todos').delete().eq('id', td.id);
       }
-      // Batch: the whole batch is excluded from the reference check, so a
-      // file referenced only by the deleted rows is still trashed.
-      {
-        const excludeKeys = batchExcludeKeys(doneTodos);
-        for (const td of doneTodos) {
-          try { await trashOwnItemAttachments(td, allTodos, excludeKeys); } catch {}
-        }
-      }
       // Shared deletes upload in the background; failures restore the pointer rows.
       if (state.sharing && pointerRows.length) {
         (async () => {
@@ -1198,6 +1190,10 @@ async function deleteAllDoneTodos(catId) {
       }
       showToast(t('toast.deleted'), 'info');
       await refreshTodos();
+      // Attachment cleanup runs unawaited after the refresh (v2.32.198):
+      // the reference set is computed once for the batch, and a big
+      // clear-done must not hold up the toast.
+      trashBatchItemAttachments(doneTodos, allTodos).catch(e => console.warn('Failed to trash batch attachments:', e));
     }
   );
 }
@@ -1539,15 +1535,12 @@ async function deleteCategory(catId) {
     for (const todo of todosInCat) {
       await state.db.from('todos').delete().eq('id', todo.id);
     }
-    {
-      const excludeKeys = batchExcludeKeys(todosInCat);
-      for (const todo of todosInCat) {
-        try { await trashOwnItemAttachments(todo, allTodos, excludeKeys); } catch {}
-      }
-    }
     await state.db.from('todo_categories').delete().eq('id', catId);
     showToast(t('toast.deleted'), 'info');
     await refreshTodos();
+    // Attachment cleanup runs unawaited after the refresh (v2.32.198) —
+    // see deleteAllDoneTodos: reference set once per batch.
+    trashBatchItemAttachments(todosInCat, allTodos).catch(e => console.warn('Failed to trash batch attachments:', e));
     // Propagate deletion of shared items to the sharing layer in the
     // background (sequential, etag order). A failure restores the category
     // and its items locally.
@@ -1662,16 +1655,13 @@ async function deleteSectionSubtree() {
   }
   // Explicit per-item deletion so calendar dirty tracking fires.
   for (const item of itemRows) await state.db.from('todos').delete().eq('id', item.id);
-  {
-    const excludeKeys = batchExcludeKeys(itemRows);
-    for (const item of itemRows) {
-      try { await trashOwnItemAttachments(item, allTodos, excludeKeys); } catch {}
-    }
-  }
   for (const bid of bucketIds) await state.db.from('todo_categories').delete().eq('id', bid);
   for (const sid of sectionIds) await state.db.from('todo_categories').delete().eq('id', sid);
   showToast(t('toast.deleted'), 'info');
   await refreshTodos();
+  // Attachment cleanup runs unawaited after the refresh (v2.32.198) —
+  // see deleteAllDoneTodos: reference set once per batch.
+  trashBatchItemAttachments(itemRows, allTodos).catch(e => console.warn('Failed to trash batch attachments:', e));
   if (state.sharing) {
     const sharedItems = itemRows.filter(t2 => t2.shared_id && t2.shared_group_id);
     if (sharedItems.length) {
@@ -2415,9 +2405,14 @@ async function bulkShareTodoCategory(catId, el) {
             }
           }
           await refreshTodos();
-          if (ok === staged.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
-          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, staged.length), 'error');
+          // The total is every item attempted, not just the staged ones:
+          // items skipped at grant, staging or pointer time still count,
+          // so a partial run never reports "N of N" while items silently
+          // stayed personal — and an all-skipped run still gets a toast.
+          if (ok === items.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
+          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, items.length), 'error');
           else if (staged.length > 0) showToast(t('toast.failed_to_add'), 'error');
+          else showToast(t('sharing.share_all_partial', 0, items.length), 'error');
         } finally {
           _bulkShareInProgress.delete(catId);
           if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }

@@ -6,7 +6,7 @@ import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditT
 import { t, getLang } from './i18n.js';
 import { pendingSharedNextDue as _pendingSharedNextDue } from './pending-next-due.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
-import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, batchExcludeKeys, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
+import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, trashBatchItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
 
 // ===================================================================
 // HABITS — DATA, CRUD & RENDERING
@@ -2622,16 +2622,13 @@ async function deleteHabitCategory(catId) {
     for (const habit of habitsInCat) {
       await state.db.from('habits').delete().eq('id', habit.id);
     }
-    {
-      const excludeKeys = batchExcludeKeys(habitsInCat);
-      for (const habit of habitsInCat) {
-        try { await trashOwnItemAttachments(habit, state.allHabits, excludeKeys); } catch {}
-      }
-    }
     const { error } = await state.db.from('habit_categories').delete().eq('id', catId);
     if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
     showToast(t('habits.category_deleted', cat.name), 'info');
     await refreshHabits();
+    // Attachment cleanup runs unawaited after the refresh (v2.32.198) —
+    // see the TODOs clear-done: reference set once per batch.
+    trashBatchItemAttachments(habitsInCat, state.allHabits).catch(e => console.warn('Failed to trash batch attachments:', e));
     // Propagate deletion of shared habits to the sharing layer in the
     // background (sequential, etag order). A failure restores the category
     // and its habits locally.
@@ -2745,16 +2742,13 @@ async function deleteHabitSectionSubtree() {
   }
   // Explicit per-item deletion so calendar dirty tracking fires.
   for (const item of itemRows) await state.db.from('habits').delete().eq('id', item.id);
-  {
-    const excludeKeys = batchExcludeKeys(itemRows);
-    for (const item of itemRows) {
-      try { await trashOwnItemAttachments(item, state.allHabits, excludeKeys); } catch {}
-    }
-  }
   for (const bid of bucketIds) await state.db.from('habit_categories').delete().eq('id', bid);
   for (const sid of sectionIds) await state.db.from('habit_categories').delete().eq('id', sid);
   showToast(t('toast.deleted'), 'info');
   await refreshHabits();
+  // Attachment cleanup runs unawaited after the refresh (v2.32.198) —
+  // see the TODOs clear-done: reference set once per batch.
+  trashBatchItemAttachments(itemRows, state.allHabits).catch(e => console.warn('Failed to trash batch attachments:', e));
   if (state.sharing) {
     const sharedItems = itemRows.filter(h => h.shared_id && h.shared_group_id);
     if (sharedItems.length) {
@@ -3231,9 +3225,14 @@ async function bulkShareHabitCategory(catId, el) {
             }
           }
           await refreshHabits();
-          if (ok === staged.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
-          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, staged.length), 'error');
+          // The total is every item attempted, not just the staged ones:
+          // items skipped at grant, staging or pointer time still count,
+          // so a partial run never reports "N of N" while items silently
+          // stayed personal — and an all-skipped run still gets a toast.
+          if (ok === items.length && ok > 0) showToast(t('sharing.share_all_done', ok), 'success');
+          else if (ok > 0) showToast(t('sharing.share_all_partial', ok, items.length), 'error');
           else if (staged.length > 0) showToast(t('toast.failed_to_add'), 'error');
+          else showToast(t('sharing.share_all_partial', 0, items.length), 'error');
         } finally {
           _bulkShareInProgress.delete(catId);
           if (btn) { btn.disabled = false; btn.classList.remove('is-pending'); btn.removeAttribute('aria-busy'); }

@@ -226,6 +226,62 @@ function scoreCurveSvg(scores) {
 }
 // ── End pure chunk-score helpers ──
 
+// ── Pure chunk-progress repair helpers ──
+// Delta repair for text_line_progress (v2.32.200): the 2026-11-28
+// Intégrale wipe showed the old delete-all repair destroys FSRS state
+// on a bare count mismatch — one missing row was enough to delete all
+// 37 rows, 4 of them reviewed. Repair is now keyed by chunk_index:
+// keep every existing row, insert blanks only for missing indexes,
+// and delete only surplus rows that carry no review state. A surplus
+// row that DOES carry state is preserved in storage (never deleted
+// here) and only left out of the in-memory working set, so it renders
+// nothing extra and resumes if the chunking grows back to cover it.
+// The deliberate invalidation in persistTextEdit (scene-parse.js) is
+// the only path that drops reviewed progress, and is unchanged.
+function chunkHasReviewState(row) {
+  if (!row) return false;
+  if (row.last_review || row.next_review) return true;
+  if ((row.review_count || 0) > 0) return true;
+  if ((row.stability || 0) > 0) return true;
+  // Free practice writes scores without touching scheduling, so a
+  // score history alone is review state too. A chunk-edit reset
+  // (stability 0, difficulty 5, review_count 0, no last/next/scores)
+  // is deliberately NOT state: difficulty 5 is just the reset default.
+  return parseRecentScores(row.recent_scores).length > 0;
+}
+function planChunkProgressRepair(existing, chunkCount) {
+  const kept = [];
+  const keptByIndex = new Map();
+  const insertIndexes = [];
+  const deleteRowIds = [];
+  const preservedRows = [];
+  const dropRow = (row) => {
+    // A row without an id cannot be deleted by id; leaving it in
+    // storage is the safe side — it is excluded from memory either way.
+    if (chunkHasReviewState(row)) preservedRows.push(row);
+    else if (row.id != null) deleteRowIds.push(row.id);
+  };
+  for (const row of existing || []) {
+    const idx = row.chunk_index;
+    const inRange = Number.isInteger(idx) && idx >= 0 && idx < chunkCount;
+    if (!inRange) { dropRow(row); continue; }
+    if (!keptByIndex.has(idx)) { keptByIndex.set(idx, row); kept.push(row); continue; }
+    const current = keptByIndex.get(idx);
+    if (!chunkHasReviewState(current) && chunkHasReviewState(row)) {
+      // Duplicate index: prefer the reviewed copy; the blank first
+      // copy is the one that may go.
+      keptByIndex.set(idx, row);
+      kept[kept.indexOf(current)] = row;
+      dropRow(current);
+    } else {
+      dropRow(row);
+    }
+  }
+  for (let idx = 0; idx < chunkCount; idx++) if (!keptByIndex.has(idx)) insertIndexes.push(idx);
+  return { kept, insertIndexes, deleteRowIds, preservedRows };
+}
+// ── End pure chunk-progress repair helpers ──
+
 // ── Pure all-chunks session helpers ──
 // Line states in reveal order: { pos, kind, state } where pos is the
 // chunk's position in the session, kind is 'mine' | 'cue' | 'dir', and
@@ -364,30 +420,44 @@ async function refreshFlashcards() {
     allChunkProgress = await fetchAll(() => state.db.from('text_line_progress').select('*').order('chunk_index'));
     progressReadOk = true;
   } catch (e) { allChunkProgress = []; }
-  // Auto-repair: progress rows must match the current chunking. Regenerate
-  // when missing entirely or when the count mismatches (partial insert, or
-  // chunking changed without invalidation) — stale rows are dropped first.
-  // Backend mutations are error-checked: in-memory state is only touched
-  // after successful writes, otherwise the next load retries.
+  // Delta auto-repair: progress rows must match the current chunking,
+  // keyed by chunk_index. Keep every existing row, insert blanks only
+  // for missing indexes, and delete only surplus rows that carry no
+  // review state — a bare count mismatch must never wipe reviewed
+  // chunks (Intégrale, 2026-11-28: 37 rows deleted over one missing
+  // row). Surplus rows that do carry state stay in storage and are
+  // only left out of the in-memory working set; the deliberate
+  // invalidation in persistTextEdit is the path that drops them.
+  // Backend mutations are error-checked: in-memory state is only
+  // touched after successful writes, otherwise the next load retries.
   if (progressReadOk) for (const tx of allTexts) {
     if (!tx.content) continue;
     const existing = allChunkProgress.filter(ch => ch.text_id === tx.id);
     const chunkCount = getTextChunks(tx).length;
-    if (existing.length !== chunkCount) {
-      try {
-        if (existing.length > 0 && state.db.connected) {
-          const { error: delError } = await state.db.from('text_line_progress').delete().eq('text_id', tx.id);
-          if (delError) throw delError;
-          allChunkProgress = allChunkProgress.filter(ch => ch.text_id !== tx.id);
-        }
-        const rows = Array.from({ length: chunkCount }, (_, idx) => ({ text_id: tx.id, chunk_index: idx }));
-        if (rows.length > 0 && state.db.connected) {
-          const { data: inserted, error: insError } = await state.db.from('text_line_progress').insert(rows).select('*');
-          if (insError) throw insError;
-          if (inserted) allChunkProgress.push(...inserted);
-        }
-      } catch (_) { /* silent — will retry next load */ }
+    const plan = planChunkProgressRepair(existing, chunkCount);
+    if (plan.insertIndexes.length === 0 && plan.deleteRowIds.length === 0 && plan.preservedRows.length === 0) continue;
+    if (plan.preservedRows.length > 0) {
+      console.warn(`[DeLaClaw] chunk progress: preserving ${plan.preservedRows.length} state-carrying surplus row(s) for text ${tx.id} (chunking now ${chunkCount} chunks)`);
     }
+    try {
+      for (const rowId of plan.deleteRowIds) {
+        const { error: delError } = await state.db.from('text_line_progress').delete().eq('id', rowId);
+        if (delError) throw delError;
+      }
+      let inserted = [];
+      if (plan.insertIndexes.length > 0 && state.db.connected) {
+        const rows = plan.insertIndexes.map(idx => ({ text_id: tx.id, chunk_index: idx }));
+        const { data, error: insError } = await state.db.from('text_line_progress').insert(rows).select('*');
+        if (insError) throw insError;
+        inserted = data || [];
+      }
+      // In-memory state only after successful writes: kept rows plus
+      // the inserted blanks; preserved surplus rows stay in storage
+      // but out of the working set, and deleted rows drop out.
+      const keptSet = new Set(plan.kept);
+      allChunkProgress = allChunkProgress.filter(ch => ch.text_id !== tx.id || keptSet.has(ch));
+      if (inserted.length > 0) allChunkProgress.push(...inserted);
+    } catch (_) { /* silent — will retry next load */ }
   }
   // Score history arrives as a JSON string (or is missing on rows
   // written before the column existed); keep one in-memory shape.

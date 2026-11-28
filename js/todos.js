@@ -6,7 +6,7 @@ import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTre
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
-import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
+import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, batchExcludeKeys, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
 
 // ===================================================================
 // TODOS — DATA & CRUD (Category Card Layout)
@@ -1172,7 +1172,7 @@ async function deleteAllDoneTodos(catId) {
       // Batch: the whole batch is excluded from the reference check, so a
       // file referenced only by the deleted rows is still trashed.
       {
-        const excludeKeys = new Set(doneTodos.map((t) => `todos:${t.id}`));
+        const excludeKeys = batchExcludeKeys(doneTodos);
         for (const td of doneTodos) {
           try { await trashOwnItemAttachments(td, allTodos, excludeKeys); } catch {}
         }
@@ -1540,7 +1540,7 @@ async function deleteCategory(catId) {
       await state.db.from('todos').delete().eq('id', todo.id);
     }
     {
-      const excludeKeys = new Set(todosInCat.map((t) => `todos:${t.id}`));
+      const excludeKeys = batchExcludeKeys(todosInCat);
       for (const todo of todosInCat) {
         try { await trashOwnItemAttachments(todo, allTodos, excludeKeys); } catch {}
       }
@@ -1663,7 +1663,7 @@ async function deleteSectionSubtree() {
   // Explicit per-item deletion so calendar dirty tracking fires.
   for (const item of itemRows) await state.db.from('todos').delete().eq('id', item.id);
   {
-    const excludeKeys = new Set(itemRows.map((t) => `todos:${t.id}`));
+    const excludeKeys = batchExcludeKeys(itemRows);
     for (const item of itemRows) {
       try { await trashOwnItemAttachments(item, allTodos, excludeKeys); } catch {}
     }

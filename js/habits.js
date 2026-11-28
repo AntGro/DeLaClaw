@@ -6,7 +6,7 @@ import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditT
 import { t, getLang } from './i18n.js';
 import { pendingSharedNextDue as _pendingSharedNextDue } from './pending-next-due.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
-import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
+import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, batchExcludeKeys, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
 
 // ===================================================================
 // HABITS — DATA, CRUD & RENDERING
@@ -2623,7 +2623,7 @@ async function deleteHabitCategory(catId) {
       await state.db.from('habits').delete().eq('id', habit.id);
     }
     {
-      const excludeKeys = new Set(habitsInCat.map((h) => `habits:${h.id}`));
+      const excludeKeys = batchExcludeKeys(habitsInCat);
       for (const habit of habitsInCat) {
         try { await trashOwnItemAttachments(habit, state.allHabits, excludeKeys); } catch {}
       }
@@ -2746,7 +2746,7 @@ async function deleteHabitSectionSubtree() {
   // Explicit per-item deletion so calendar dirty tracking fires.
   for (const item of itemRows) await state.db.from('habits').delete().eq('id', item.id);
   {
-    const excludeKeys = new Set(itemRows.map((h) => `habits:${h.id}`));
+    const excludeKeys = batchExcludeKeys(itemRows);
     for (const item of itemRows) {
       try { await trashOwnItemAttachments(item, state.allHabits, excludeKeys); } catch {}
     }

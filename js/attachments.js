@@ -81,6 +81,21 @@ function referencedFileIdsFromItems(items, excludeKeys = new Set()) {
   return ids;
 }
 
+// Pure: the exclusion keys for a batch delete — the local id of every item
+// being deleted, plus its shared id when it has one. referencedFileIdsFromItems
+// compares keys against raw item.id / item.shared_id, so a prefixed key
+// (`todos:<id>`) never matches and the batch's own files are counted as
+// referenced — batch deletes then trash nothing (v2.32.196).
+function batchExcludeKeys(items) {
+  const keys = new Set();
+  for (const item of items || []) {
+    if (!item) continue;
+    if (item.id) keys.add(item.id);
+    if (item.shared_id) keys.add(item.shared_id);
+  }
+  return keys;
+}
+
 // Pure: the display name of a member id in a members list, or null when
 // the member is not found (left the group, or the id predates the row).
 // The invited label is the fallback — it is what the UI shows for a
@@ -497,7 +512,7 @@ function createAttachmentQueue({ getItem, getLocalItems, itemAlive, saveAttachme
 
 export {
   normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl,
-  ownAttachmentFiles, referencedFileIdsFromItems, memberDisplayName,
+  ownAttachmentFiles, referencedFileIdsFromItems, batchExcludeKeys, memberDisplayName,
   myAttachmentUploaderId, referencedAttachmentFileIds, attachmentUploaderName,
   trashOwnItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants,
   attachmentsHtml, createAttachmentQueue,

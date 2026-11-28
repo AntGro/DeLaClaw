@@ -10202,7 +10202,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const start = attJs.indexOf('// ── Pure attachment helpers ──');
       const end = attJs.indexOf('// ── End pure attachment helpers ──');
       assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in attachments.js');
-      return new Function(`${attJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, ownAttachmentFiles, referencedFileIdsFromItems, memberDisplayName };`)();
+      return new Function(`${attJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, ownAttachmentFiles, referencedFileIdsFromItems, batchExcludeKeys, memberDisplayName };`)();
     }
 
     function loadListItemHelpers() {
@@ -10332,6 +10332,56 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(withoutBShared.has('f1') && !withoutBShared.has('f2'), 'excluding by shared id drops that item\u2019s references');
       const withoutA = referencedFileIdsFromItems(items, new Set(['li-a', 'li-b']));
       assert(withoutA.size === 0, 'excluding every referrer leaves nothing referenced');
+    });
+
+    test('attachments: batchExcludeKeys builds raw id + shared_id keys', () => {
+      const { batchExcludeKeys } = loadAttachmentHelpers();
+      const keys = batchExcludeKeys([
+        { id: 't1', shared_id: 'sh-1' },
+        { id: 't2' },
+        { shared_id: 'sh-3' },
+        null,
+        { id: '' },
+      ]);
+      assert(keys.has('t1') && keys.has('sh-1') && keys.has('t2') && keys.has('sh-3'), 'every local and shared id must be a key');
+      assert(keys.size === 4, 'null items and empty ids must not add keys');
+      assert(!keys.has('todos:t1') && !keys.has('habits:t2'), 'keys must be raw ids, never prefixed');
+      assert(batchExcludeKeys(null).size === 0 && batchExcludeKeys([]).size === 0, 'a missing or empty batch has no keys');
+    });
+
+    test('attachments: batch deletes exclude the whole batch from the reference check', () => {
+      const { referencedFileIdsFromItems, batchExcludeKeys } = loadAttachmentHelpers();
+      const rec = (id) => ({ drive_file_id: id, name: `${id}.pdf`, size: 1, url: 'https://x', uploaded_by: 'm' });
+      const items = [
+        { id: 't1', attachments: [rec('f1')] },
+        { id: 't2', shared_id: 'sh-2', attachments: [rec('f2')] },
+        { id: 't3', attachments: [rec('f3')] },
+      ];
+      const batch = [items[0], items[1]];
+      const referenced = referencedFileIdsFromItems(items, batchExcludeKeys(batch));
+      assert(!referenced.has('f1') && !referenced.has('f2'), 'the batch’s own files must not count as referenced');
+      assert(referenced.has('f3'), 'a surviving item’s files must still count as referenced');
+      // The old shape: prefixed keys never matched the raw-id comparison,
+      // so the batch stayed referenced and nothing was ever trashed.
+      const prefixed = new Set(batch.map(i => `todos:${i.id}`));
+      const stillReferenced = referencedFileIdsFromItems(items, prefixed);
+      assert(stillReferenced.has('f1') && stillReferenced.has('f2'), 'prefixed keys must not exclude anything (the bug this fixes)');
+    });
+
+    test('batch deletes build exclusion keys with batchExcludeKeys everywhere', () => {
+      const todosSrc = jsFiles['todos.js'];
+      const habitsSrc = jsFiles['habits.js'];
+      const listsSrc = jsFiles['lists.js'];
+      assert(todosSrc.includes('batchExcludeKeys(doneTodos)'), 'clear-done must exclude the done batch by raw keys');
+      assert(todosSrc.includes('batchExcludeKeys(todosInCat)'), 'TODO category delete must exclude the category batch by raw keys');
+      assert(todosSrc.includes('batchExcludeKeys(itemRows)'), 'TODO section delete must exclude the subtree batch by raw keys');
+      assert(habitsSrc.includes('batchExcludeKeys(habitsInCat)'), 'habit category delete must exclude the category batch by raw keys');
+      assert(habitsSrc.includes('batchExcludeKeys(itemRows)'), 'habit section delete must exclude the subtree batch by raw keys');
+      assert(listsSrc.includes('batchExcludeKeys(items)'), 'list delete must exclude the list batch by raw keys');
+      assert(listsSrc.includes('batchExcludeKeys(itemRows)'), 'list section delete must exclude the subtree batch by raw keys');
+      for (const [name, src] of [['todos.js', todosSrc], ['habits.js', habitsSrc], ['lists.js', listsSrc]]) {
+        assert(!src.includes('todos:${') && !src.includes('habits:${'), `${name} must not build prefixed exclusion keys`);
+      }
     });
 
     test('sharing: folderTrashPlan spares referenced files and keeps the folder when one remains', () => {

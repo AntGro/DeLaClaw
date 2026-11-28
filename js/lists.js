@@ -5,7 +5,7 @@ import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTre
 import { cleanupDragArtifacts, scrollToAndHighlight, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, snapshotRows, animateRowsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t } from './i18n.js';
 import { sharedBadge, assigneeDots, openSharePopover } from './sharing-ui.js';
-import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
+import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, batchExcludeKeys, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
 
 // ===================================================================
 // LISTS — GENERIC USER-CREATED LISTS (bucket-card layout)
@@ -1304,8 +1304,7 @@ async function deleteList(listId) {
       // Exclude the whole batch from the reference check: every item in
       // this list is being deleted, so none of them counts as a surviving
       // reference to another's file.
-      const excludeKeys = new Set();
-      for (const item of items) { excludeKeys.add(item.id); if (item.shared_id) excludeKeys.add(item.shared_id); }
+      const excludeKeys = batchExcludeKeys(items);
       for (const item of items) {
         try { await trashOwnItemAttachments(item, state.allListItems, excludeKeys); } catch {}
       }
@@ -1432,8 +1431,7 @@ async function deleteListSectionSubtree() {
   // Same as deleting each list: trash my own attachments on every item
   // in the subtree. Best-effort. Exclude the whole subtree from the
   // reference check — every item in it is being deleted.
-  const excludeKeys = new Set();
-  for (const item of itemRows) { excludeKeys.add(item.id); if (item.shared_id) excludeKeys.add(item.shared_id); }
+  const excludeKeys = batchExcludeKeys(itemRows);
   for (const item of itemRows) {
     try { await trashOwnItemAttachments(item, state.allListItems, excludeKeys); } catch {}
   }

@@ -1062,7 +1062,6 @@ async function saveListItemAttachments(item, next) {
 const listItemAttachments = createAttachmentQueue({
   getItem: (id) => (state.allListItems || []).find(x => x.id === id),
   getLocalItems: () => state.allListItems || [],
-  itemAlive: (item) => (state.allListItems || []).some(x => x.id === item.id),
   saveAttachments: saveListItemAttachments,
   render: () => renderLists(),
   actions: { remove: 'remove-list-item-attachment', cancel: 'cancel-list-item-attachment', retry: 'retry-list-item-attachment' },

@@ -274,7 +274,7 @@ function pendingAttachmentChipHtml(item, p, actions, i18nPrefix) {
 // save path (column for personal items, shared payload/object for shared
 // ones), the re-render, and the data-action names on the chips.
 // getLocalItems supplies the collection for the reference check on remove.
-function createAttachmentQueue({ getItem, getLocalItems, itemAlive, saveAttachments, render, actions, i18nPrefix }) {
+function createAttachmentQueue({ getItem, getLocalItems, saveAttachments, render, actions, i18nPrefix }) {
   async function attach(itemId, btnEl) {
     const item = getItem(itemId);
     if (!item) return;
@@ -312,9 +312,11 @@ function createAttachmentQueue({ getItem, getLocalItems, itemAlive, saveAttachme
    * that chip in an error state with a retry and the queue moves on to
    * the next file; a cancel drops the chip silently. Each finished file
    * is saved onto the item at once, so its chip turns real without
-   * waiting for its siblings still in the queue; the save reads the
-   * freshly-stored list, so an attachment removed while an upload ran
-   * is not resurrected.
+   * waiting for its siblings still in the queue. The item is re-resolved
+   * via getItem before each save: refreshes replace every object, so the
+   * item held from attach()/retry() may be detached — saving from it
+   * would resurrect a record removed meanwhile and write the chip onto
+   * an object no view renders.
    */
   async function processQueue(item) {
     if (_attachmentQueueRunning.has(item.id)) return;
@@ -395,15 +397,21 @@ function createAttachmentQueue({ getItem, getLocalItems, itemAlive, saveAttachme
             }
           }
           // Save this record now — the chip turns real without waiting for
-          // its siblings still in the queue.
-          if (!itemAlive(item)) {
+          // its siblings still in the queue. Re-resolve first: the held
+          // item may be detached after a refresh, so its attachments list
+          // is stale — building on it would resurrect a record removed
+          // meanwhile, and the in-memory write would land on an object no
+          // view renders (the chip vanishes until the next refresh).
+          // A null return is the aliveness test: the item was deleted.
+          const live = getItem(item.id);
+          if (!live) {
             if (grantedIds.length) await rollbackAttachmentGrants(item.shared_group_id, [{ fileId: record.drive_file_id, memberIds: grantedIds }]);
             pending.delete(entry.id);
             continue; // the item was deleted meanwhile; the file stays orphaned in Drive
           }
-          const next = [...normalizeAttachments(item.attachments), record];
+          const next = [...normalizeAttachments(live.attachments), record];
           try {
-            await saveAttachments(item, next);
+            await saveAttachments(live, next);
           } catch {
             if (grantedIds.length) await rollbackAttachmentGrants(item.shared_group_id, [{ fileId: record.drive_file_id, memberIds: grantedIds }]);
             showToast(t('toast.update_failed'), 'error');
@@ -414,7 +422,7 @@ function createAttachmentQueue({ getItem, getLocalItems, itemAlive, saveAttachme
           }
           pending.delete(entry.id);
           added.push(record);
-          item.attachments = next;
+          live.attachments = next;
           render();
         } catch (e) {
           if (e?.code === 'aborted' || entry.status === 'cancelled') {
@@ -473,25 +481,32 @@ function createAttachmentQueue({ getItem, getLocalItems, itemAlive, saveAttachme
       t('common.delete'),
       `Remove "${target.name}"?`,
       async () => {
-        const next = attachments.filter(a => a.drive_file_id !== driveFileId);
+        // Re-resolve: the item may have been replaced by a refresh, or
+        // gained a record from a finished upload, between the tap and
+        // the confirm. Building on the call-time snapshot would wipe
+        // the newer record; writing to the held object would leave the
+        // chip visible until the next refresh.
+        const live = getItem(itemId);
+        if (!live) return;
+        const next = normalizeAttachments(live.attachments).filter(a => a.drive_file_id !== driveFileId);
         try {
-          await saveAttachments(item, next);
+          await saveAttachments(live, next);
         } catch {
           showToast(t('toast.update_failed'), 'error');
           return;
         }
-        item.attachments = next;
+        live.attachments = next;
         render();
         // Best-effort: trash the Drive file so it doesn't linger orphaned —
         // but only when it is mine. Removing another member's chip removes
         // the record from the payload (any member may edit a shared item);
         // their file stays untouched in their Drive.
-        const myId = await myAttachmentUploaderId(item);
+        const myId = await myAttachmentUploaderId(live);
         if (myId && target.uploaded_by === myId) {
           // Reference check (v2.32.138): another item may still link this
           // file — the record is already gone from this item, so any hit
           // is a surviving reference, and the file is left alone.
-          const referenced = referencedAttachmentFileIds(getLocalItems(), new Set([item.id, item.shared_id].filter(Boolean)));
+          const referenced = referencedAttachmentFileIds(getLocalItems(), new Set([live.id, live.shared_id].filter(Boolean)));
           if (!referenced.has(driveFileId)) {
             try { await state.driveAdapter?.trashAttachmentFile?.(driveFileId); } catch {}
           }

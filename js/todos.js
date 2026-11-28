@@ -2231,7 +2231,6 @@ async function saveTodoAttachments(todo, next) {
 const todoAttachments = createAttachmentQueue({
   getItem: (id) => allTodos.find(t => t.id === id),
   getLocalItems: () => allTodos,
-  itemAlive: (item) => allTodos.some(t => t.id === item.id),
   saveAttachments: saveTodoAttachments,
   render: renderTodos,
   actions: { remove: 'remove-todo-attachment', cancel: 'cancel-todo-attachment', retry: 'retry-todo-attachment' },

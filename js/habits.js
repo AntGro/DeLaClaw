@@ -2791,7 +2791,6 @@ async function saveHabitAttachments(habit, next) {
 const habitAttachments = createAttachmentQueue({
   getItem: (id) => (state.allHabits || []).find(h => h.id === id),
   getLocalItems: () => state.allHabits || [],
-  itemAlive: (item) => (state.allHabits || []).some(h => h.id === item.id),
   saveAttachments: saveHabitAttachments,
   render: renderHabits,
   actions: { remove: 'remove-habit-attachment', cancel: 'cancel-habit-attachment', retry: 'retry-habit-attachment' },

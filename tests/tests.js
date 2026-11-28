@@ -10205,6 +10205,18 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       return new Function(`${attJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, ownAttachmentFiles, referencedFileIdsFromItems, batchExcludeKeys, memberDisplayName };`)();
     }
 
+    function loadAttachmentQueue() {
+      // Evaluate the queue with fake globals: the pure helpers through
+      // createAttachmentQueue, minus the export block. Each call gets
+      // fresh module-level queue state (pending maps, running set).
+      const attJs = jsFiles['attachments.js'];
+      const start = attJs.indexOf('// ── Pure attachment helpers ──');
+      const end = attJs.indexOf('\nexport {');
+      assert(start !== -1 && end > start, 'could not find the attachment queue block in attachments.js');
+      return new Function('state', 'document', 'showToast', 'showConfirmAction', 't',
+        `${attJs.slice(start, end)}; return { createAttachmentQueue };`);
+    }
+
     function loadListItemHelpers() {
       // The list-item helpers call normalizeAttachments, which now lives
       // in the shared module — concatenate both pure blocks.
@@ -10384,6 +10396,129 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
+    test('attachments: processQueue saves onto the live item, not the held one', async () => {
+      const loadQueue = loadAttachmentQueue();
+      const recA = { drive_file_id: 'f-A', name: 'a.pdf', size: 1, url: 'https://x/a', uploaded_by: 'me' };
+      const recB = { drive_file_id: 'f-B', name: 'b.pdf', size: 1, url: 'https://x/b', uploaded_by: 'me' };
+      const held = { id: 'todo-1', attachments: [recA] };
+      let current = held;
+      let uploadResolve;
+      const fakeFile = { name: 'b.pdf', size: 1 };
+      const fakeInput = { type: '', multiple: false, className: '', style: {}, files: [fakeFile],
+        click() { if (this.onchange) this.onchange(); }, remove() {}, onchange: null };
+      const fakeState = {
+        driveAdapter: { uploadAttachment: async () => new Promise(r => { uploadResolve = r; }) },
+        sharing: { getCurrentUserMemberId: async () => 'me' },
+      };
+      const fakeDocument = { createElement: () => fakeInput, body: { appendChild: () => {} }, querySelector: () => null };
+      const saves = [];
+      const { createAttachmentQueue } = loadQueue(fakeState, fakeDocument, () => {}, () => {}, (k) => k);
+      const queue = createAttachmentQueue({
+        getItem: (id) => (id === 'todo-1' ? current : undefined),
+        getLocalItems: () => [current],
+        saveAttachments: async (item, next) => { saves.push({ item, next }); },
+        render: () => {},
+        actions: {},
+        i18nPrefix: 'todos',
+      });
+      queue.attach('todo-1');
+      // Wait for the upload to start (processQueue reached its await).
+      for (let i = 0; i < 50 && !uploadResolve; i++) await new Promise(r => setTimeout(r, 10));
+      assert(uploadResolve, 'the upload must have started before the refresh');
+      // Refresh + remove meanwhile: the live object now has no attachments.
+      const live = { id: 'todo-1', attachments: [] };
+      current = live;
+      uploadResolve(recB);
+      for (let i = 0; i < 100 && saves.length === 0; i++) await new Promise(r => setTimeout(r, 10));
+      assert(saves.length === 1, 'the finished upload must save exactly once');
+      assert(saves[0].item === live, 'the save must go to the live object, not the held one');
+      assert(saves[0].next.map(a => a.drive_file_id).join(',') === 'f-B', 'the removed record must not be resurrected');
+      assert(live.attachments.map(a => a.drive_file_id).join(',') === 'f-B', 'the live object must carry the new chip');
+      assert(held.attachments.map(a => a.drive_file_id).join(',') === 'f-A', 'the detached object must be untouched');
+      assert(queue.pendingFor('todo-1').length === 0, 'the pending entry must be gone');
+    });
+
+    test('attachments: processQueue drops the entry when the item was deleted', async () => {
+      const loadQueue = loadAttachmentQueue();
+      const recB = { drive_file_id: 'f-B', name: 'b.pdf', size: 1, url: 'https://x/b', uploaded_by: 'me' };
+      let current = { id: 'todo-1', attachments: [] };
+      let uploadResolve;
+      const fakeFile = { name: 'b.pdf', size: 1 };
+      const fakeInput = { type: '', multiple: false, className: '', style: {}, files: [fakeFile],
+        click() { if (this.onchange) this.onchange(); }, remove() {}, onchange: null };
+      const fakeState = {
+        driveAdapter: { uploadAttachment: async () => new Promise(r => { uploadResolve = r; }) },
+        sharing: { getCurrentUserMemberId: async () => 'me' },
+      };
+      const fakeDocument = { createElement: () => fakeInput, body: { appendChild: () => {} }, querySelector: () => null };
+      const saves = [];
+      const { createAttachmentQueue } = loadQueue(fakeState, fakeDocument, () => {}, () => {}, (k) => k);
+      const queue = createAttachmentQueue({
+        getItem: (id) => (id === 'todo-1' ? current : undefined),
+        getLocalItems: () => (current ? [current] : []),
+        saveAttachments: async (item, next) => { saves.push({ item, next }); },
+        render: () => {},
+        actions: {},
+        i18nPrefix: 'todos',
+      });
+      queue.attach('todo-1');
+      for (let i = 0; i < 50 && !uploadResolve; i++) await new Promise(r => setTimeout(r, 10));
+      assert(uploadResolve, 'the upload must have started before the delete');
+      current = undefined; // the item was deleted meanwhile
+      uploadResolve(recB);
+      for (let i = 0; i < 100 && queue.pendingFor('todo-1').length > 0; i++) await new Promise(r => setTimeout(r, 10));
+      assert(saves.length === 0, 'a deleted item must not be saved to');
+      assert(queue.pendingFor('todo-1').length === 0, 'the pending entry must be dropped');
+    });
+
+    test('attachments: remove() confirms against the live item, not the call-time snapshot', async () => {
+      const loadQueue = loadAttachmentQueue();
+      const recA = { drive_file_id: 'f-A', name: 'a.pdf', size: 1, url: 'https://x/a', uploaded_by: 'me' };
+      const recB = { drive_file_id: 'f-B', name: 'b.pdf', size: 1, url: 'https://x/b', uploaded_by: 'me' };
+      const recC = { drive_file_id: 'f-C', name: 'c.pdf', size: 1, url: 'https://x/c', uploaded_by: 'me' };
+      const held = { id: 'todo-1', attachments: [recA, recC] };
+      let current = held;
+      let capturedConfirm;
+      const fakeState = {
+        driveAdapter: { trashAttachmentFile: async () => {} },
+        sharing: { getCurrentUserMemberId: async () => 'me', getAllSharedItems: () => [] },
+      };
+      const fakeDocument = { createElement: () => ({}), body: { appendChild: () => {} }, querySelector: () => null };
+      const saves = [];
+      const { createAttachmentQueue } = loadQueue(fakeState, fakeDocument, () => {},
+        (title, msg, cb) => { capturedConfirm = cb; }, (k) => k);
+      const queue = createAttachmentQueue({
+        getItem: (id) => (id === 'todo-1' ? current : undefined),
+        getLocalItems: () => [current],
+        saveAttachments: async (item, next) => { saves.push({ item, next }); },
+        render: () => {},
+        actions: {},
+        i18nPrefix: 'todos',
+      });
+      await queue.remove('todo-1', 'f-A');
+      assert(capturedConfirm, 'remove must ask for confirmation');
+      // An upload finished between the tap and the confirm, adding B via
+      // the fresh object — the confirm must keep it.
+      const live = { id: 'todo-1', attachments: [recA, recC, recB] };
+      current = live;
+      await capturedConfirm();
+      assert(saves.length === 1, 'the confirm must save exactly once');
+      assert(saves[0].item === live, 'the confirm must save to the live object');
+      assert(saves[0].next.map(a => a.drive_file_id).join(',') === 'f-C,f-B', 'the removed record goes, the newer record stays');
+      assert(live.attachments.map(a => a.drive_file_id).join(',') === 'f-C,f-B', 'the live object must carry the result');
+      assert(held.attachments.map(a => a.drive_file_id).join(',') === 'f-A,f-C', 'the detached object must be untouched');
+    });
+
+    test('attachments: processQueue and remove re-resolve the item via getItem', () => {
+      const attSrc = jsFiles['attachments.js'];
+      assert(attSrc.includes('const live = getItem(item.id);'), 'processQueue must re-resolve the item before saving');
+      assert(attSrc.includes('const live = getItem(itemId);'), 'remove must re-resolve the item inside the confirm');
+      assert(!attSrc.includes('itemAlive'), 'the itemAlive guard must be gone — the getItem null check replaces it');
+      assert(!attSrc.includes('the save reads the freshly-stored list'), 'the false doc comment about the save must be gone');
+      assert(attSrc.includes('saveAttachments(live, next)'), 'both saves must go to the live object');
+      assert(attSrc.includes('live.attachments = next;'), 'both in-memory writes must land on the live object');
+    });
+
     test('sharing: folderTrashPlan spares referenced files and keeps the folder when one remains', () => {
       const driveSrc = fs.readFileSync(path.join(JS_DIR, 'adapters/drive.js'), 'utf-8');
       const start = driveSrc.indexOf('function folderTrashPlan');
@@ -10414,7 +10549,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const rmStart = attSrc.indexOf('async function remove(itemId, driveFileId, btnEl)');
       const rmEnd = attSrc.indexOf("showToast(t(`${i18nPrefix}.attachment_removed`), 'success');", rmStart);
       const rmFn = attSrc.slice(rmStart, rmEnd);
-      assert(rmFn.includes('referencedAttachmentFileIds(getLocalItems(), new Set([item.id, item.shared_id].filter(Boolean)))'),
+      assert(rmFn.includes('referencedAttachmentFileIds(getLocalItems(), new Set([live.id, live.shared_id].filter(Boolean)))'),
         'removing a chip must check whether another item still references the file');
       assert(rmFn.includes('if (!referenced.has(driveFileId))'),
         'removing a chip must skip the trash when the file is still referenced');

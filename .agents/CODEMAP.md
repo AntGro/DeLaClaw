@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-28T00:53:35.713Z from 50 modules (v2.32.193). Total LOC 40767. Do not hand-edit.
+> Generated 2026-11-28T01:48:18.840Z from 50 modules (v2.32.194). Total LOC 40795. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -18,7 +18,7 @@
 | flashcards | 4533 | flashcard_decks,flashcard_notes,flashcards,settings,text_line_progress,texts | currentView,db,js,readOnlyMode | i18n,icons,item-utils,logo,scene-parse,sections-pure,state,utils | main.js,welcome.js | page-empty-state,modal,btn,project-card,card-header,empty-state,toast | pendingSet | 138 | 191 |
 | habits | 3716 | habit_categories,habit_completions,habits | _historyHabitId,allHabitCompletions,allHabits,currentView,db,driveAdapter,js,markCalDirty | attachments,calendar-pure,frequency-rule,i18n,icons,item-utils,pending-next-due,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,demo-chooser.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 62 | 138 |
 | lists | 2055 | list_items,lists | allListItems,allLists,currentView,db,driveAdapter,js,sharing | attachments,i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | main.js | page-empty-state,modal,bucket-card,btn,project-card,card-header,empty-state,toast | pendingSet | 42 | 51 |
-| todos | 2786 | todo_categories,todos | currentView,db,driveAdapter,js,markCalDirty,sharing,syncCalendarTable | attachments,calendar-pure,i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 57 | 108 |
+| todos | 2814 | todo_categories,todos | currentView,db,driveAdapter,js,markCalDirty,sharing,syncCalendarTable | attachments,calendar-pure,i18n,icons,item-utils,sections-pure,sharing-ui,state,utils | calendar-sync.js,calendar.js,main.js,welcome.js | page-empty-state,modal,btn,project-card,empty-state,toast | pendingSet | 57 | 108 |
 | welcome | 844 | - | allBirthdays,allHabitCompletions,allHabits,currentView,db,js,sharing | attachments,calendar,calendar-pure,flashcards,habits,i18n,icons,item-utils,sections-pure,sharing-ui,state,todos,utils | main.js | modal,app-header,btn | pendingSet | 85 | 52 |
 
 ## Core modules (44)

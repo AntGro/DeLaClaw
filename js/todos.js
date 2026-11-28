@@ -997,21 +997,29 @@ async function setTodoPriority(id, level) {
 
   if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
     // ─── Shared: write only to Drive (optimistic — refresh on staging) ───
-    let onStaged;
-    const staged = new Promise(resolve => { onStaged = resolve; });
+    // The payload is the live one merged with the new priority: building it
+    // from scratch would drop every other field, including attachments.
     const label = t(`todos.priority_${level}`) || level;
-    const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-      payload: { text: todo.text, category: todo.category || '', priority: level },
-    }, { onStaged });
-    upload.then(
-      () => showToast(label, 'success'),
-      async (e) => {
-        console.warn('Failed to update shared todo priority on Drive:', e);
-        await refreshTodos();
-        showToast(t('toast.update_failed'), 'error');
-      }
-    );
-    await Promise.race([staged, upload.then(() => {}, () => {})]);
+    try {
+      const payload = sharedTodoPayload(todo, { priority: level });
+      let onStaged;
+      const staged = new Promise(resolve => { onStaged = resolve; });
+      const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+        payload,
+      }, { onStaged });
+      upload.then(
+        () => showToast(label, 'success'),
+        async (e) => {
+          console.warn('Failed to update shared todo priority on Drive:', e);
+          await refreshTodos();
+          showToast(t('toast.update_failed'), 'error');
+        }
+      );
+      await Promise.race([staged, upload.then(() => {}, () => {})]);
+    } catch (e) {
+      console.warn('Shared todo payload unavailable for priority update:', e);
+      showToast(t('toast.update_failed'), 'error');
+    }
   } else {
     // ─── Normal: write to local DB ───
     const { error } = await state.db.from('todos').update({ priority: level }).eq('id', id);
@@ -1333,24 +1341,31 @@ async function editTodoInline(id, itemEl, opts = {}) {
           if (updates.priority) driveUpdates.priority = updates.priority;
           let failed = false;
           if (Object.keys(driveUpdates).length > 0) {
-            const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
-            let onStaged;
-            const staged = new Promise(resolve => { onStaged = resolve; });
-            const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-              payload: { ...currentPayload, ...driveUpdates },
-            }, { onStaged });
-            upload.then(
-              () => showToast(t('todos.todo_updated'), 'success'),
-              async (e) => {
-                failed = true;
-                console.warn('Failed to update shared todo on Drive:', e);
-                await refreshTodos();
-                showToast(t('toast.update_failed'), 'error');
-              }
-            );
-            // Unblock on staging; a pre-staging failure is caught by the
-            // failure branch above, so don't hang here.
-            await Promise.race([staged, upload.then(() => {}, () => {})]);
+            try {
+              const payload = sharedTodoPayload(todo, driveUpdates);
+              let onStaged;
+              const staged = new Promise(resolve => { onStaged = resolve; });
+              const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
+                payload,
+              }, { onStaged });
+              upload.then(
+                () => showToast(t('todos.todo_updated'), 'success'),
+                async (e) => {
+                  failed = true;
+                  console.warn('Failed to update shared todo on Drive:', e);
+                  await refreshTodos();
+                  showToast(t('toast.update_failed'), 'error');
+                }
+              );
+              // Unblock on staging; a pre-staging failure is caught by the
+              // failure branch above, so don't hang here.
+              await Promise.race([staged, upload.then(() => {}, () => {})]);
+            } catch (e) {
+              failed = true;
+              console.warn('Shared todo payload unavailable for edit:', e);
+              await refreshTodos();
+              showToast(t('toast.update_failed'), 'error');
+            }
           } else {
             showToast(t('todos.todo_updated'), 'success');
           }
@@ -1733,11 +1748,11 @@ async function doSnooze(snoozeUntil) {
     const snoozedMsg = `${t('todos.snoozed_until')} ${formatSnoozeUntil(snoozeUntil)}`;
     if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
       // ─── Shared: write snooze to Drive payload (optimistic — refresh on staging) ───
-      const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+      const payload = sharedTodoPayload(todo, { snooze_until: snoozeUntil.toISOString() });
       let onStaged;
       const staged = new Promise(resolve => { onStaged = resolve; });
       const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-        payload: { ...currentPayload, snooze_until: snoozeUntil.toISOString() },
+        payload,
       }, { onStaged });
       upload.then(
         () => showToast(snoozedMsg, 'success'),
@@ -1775,11 +1790,11 @@ function unsnoozeTodo(id, el) {
         const todo = allTodos.find(t => t.id === id);
         if (todo?.shared_id && todo?.shared_group_id && state.sharing) {
           // ─── Shared: clear snooze in the Drive payload (optimistic) ───
-          const currentPayload = { text: todo.text, category: todo.category || '', priority: todo.priority || 'normal' };
+          const payload = sharedTodoPayload(todo, { snooze_until: null });
           let onStaged;
           const staged = new Promise(resolve => { onStaged = resolve; });
           const upload = state.sharing.updateItem(todo.shared_group_id, todo.shared_id, {
-            payload: { ...currentPayload, snooze_until: null },
+            payload,
           }, { onStaged });
           upload.then(
             () => showToast(t('todos.unsnoozed'), 'success'),
@@ -2187,13 +2202,26 @@ window.shareTodoFromAdd = shareTodoFromAdd;
 // Mirrors saveListItemAttachments: shared items write through the sharing
 // payload ({ payload: {...} } partial update); personal items update the
 // todos row. Throws on failure — the queue turns it into an error chip.
+// The live shared payload for a shared TODO — the single source for every
+// shared-payload write (priority, snooze, edit, attachments). Building the
+// payload from scratch (text/category/priority only) silently drops every
+// other field, including payload.attachments. Read it live from the sharing
+// adapter — todo._shared is the snapshot refreshTodos attached, and a
+// concurrent change (another member's edit, a poll reload) must never be
+// overwritten with stale fields — and throw when it cannot be read: writing
+// a stub payload would wipe the shared fields it doesn't carry. (v2.32.194)
+function sharedTodoPayload(todo, overrides = {}) {
+  const live = state.sharing.getItems(todo.shared_group_id, 'todo')
+    .find(i => i.id === todo.shared_id);
+  if (!live?.payload) throw new Error('shared payload unavailable');
+  return { ...live.payload, ...overrides };
+}
+
 async function saveTodoAttachments(todo, next) {
   if (!todo) return;
   const payload = normalizeAttachments(next);
   if (todo.shared_id && todo.shared_group_id && state.sharing) {
-    const currentPayload = todo._shared?.payload || {};
-    const { error } = await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, { payload: { ...currentPayload, attachments: payload } });
-    if (error) throw error;
+    await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, { payload: sharedTodoPayload(todo, { attachments: payload }) });
     return;
   }
   const { error } = await state.db.from('todos').update({ attachments: serializeAttachments(payload) }).eq('id', todo.id);

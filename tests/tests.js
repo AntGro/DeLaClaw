@@ -10837,8 +10837,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(todosSrc.includes('attachmentsChipsHtml = attachmentsHtml(td, {'), 'attachments must render as chips under the TODO');
       assert(todosSrc.includes('todo.attachments = normalizeAttachments(sh.payload?.attachments)'),
         'shared TODOs must read attachments from the sharing payload');
-      assert(todosSrc.includes('const { error } = await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, { payload: { ...currentPayload, attachments: payload } })'),
-        'shared TODO attachment writes must go through the payload partial update');
+      assert(todosSrc.includes('sharedTodoPayload(todo, { attachments: payload })'),
+        'shared TODO attachment writes must go through the live payload');
       assert(todosSrc.includes('window.attachToTodo = (id, el) => todoAttachments.attach(id, el)'), 'the attach flow must be window-exposed for delegation');
       assert(todosSrc.includes('window.removeTodoAttachment = (id, fileId, el) => todoAttachments.remove(id, fileId, el)'), 'the remove flow must be window-exposed for delegation');
       assert(todosSrc.includes('shareAttachmentsWithGroup(groupId, todoAttachmentsShare)'), 'sharing a TODO must grant its files first');
@@ -10851,6 +10851,46 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(delSrc.includes("case 'remove-todo-attachment':"), 'delegation must route the remove action');
       assert(delSrc.includes("case 'cancel-todo-attachment':"), 'delegation must route the cancel action');
       assert(delSrc.includes("case 'retry-todo-attachment':"), 'delegation must route the retry action');
+    });
+
+    test('sharedTodoPayload merges onto the live payload and throws when it is missing', () => {
+      const todosSrc = jsFiles['todos.js'];
+      const start = todosSrc.indexOf('function sharedTodoPayload(todo, overrides = {}) {');
+      assert(start >= 0, 'sharedTodoPayload must be defined in todos.js');
+      const end = todosSrc.indexOf('\n}\n', start) + 3;
+      assert(end > start, 'sharedTodoPayload must have a closing brace');
+      const livePayload = { text: 'Buy milk', category: 'Errands', priority: 'high', note: 'oat', due_date: '2026-12-01', snooze_until: null, attachments: [{ drive_file_id: 'f1', name: 'list.pdf', size: 10, url: 'https://x', uploaded_by: 'm1' }] };
+      let getItemsArgs = null;
+      let items = [{ id: 'sh-1', payload: livePayload }];
+      const fakeState = { sharing: { getItems: (groupId, type) => { getItemsArgs = [groupId, type]; return items; } } };
+      const sharedTodoPayload = new Function('state', `${todosSrc.slice(start, end)}; return sharedTodoPayload;`)(fakeState);
+      const todo = { shared_group_id: 'g-1', shared_id: 'sh-1' };
+      const merged = sharedTodoPayload(todo, { priority: 'urgent' });
+      assert(JSON.stringify(merged) === JSON.stringify({ ...livePayload, priority: 'urgent' }), 'overrides must win while every other field (attachments, note, due date) survives');
+      assert(merged !== livePayload, 'the merge must copy, never mutate the live payload');
+      assert(JSON.stringify(getItemsArgs) === JSON.stringify(['g-1', 'todo']), 'the live read must query the sharing adapter for this group and type');
+      // Missing live item → throw, never a stub payload.
+      items = [];
+      let threw = null;
+      try { sharedTodoPayload(todo, { priority: 'urgent' }); } catch (e) { threw = e; }
+      assert(threw && threw.message === 'shared payload unavailable', 'a missing live item must throw, not write a stub');
+      // Live item without a payload → throw too.
+      items = [{ id: 'sh-1', payload: null }];
+      threw = null;
+      try { sharedTodoPayload(todo, {}); } catch (e) { threw = e; }
+      assert(threw && threw.message === 'shared payload unavailable', 'a live item without a payload must throw, not write a stub');
+    });
+
+    test('shared TODO updates build the payload from the live payload, never from scratch', () => {
+      const todosSrc = jsFiles['todos.js'];
+      assert(todosSrc.includes('sharedTodoPayload(todo, { priority: level })'), 'setTodoPriority must merge onto the live payload');
+      assert(todosSrc.includes('sharedTodoPayload(todo, driveUpdates)'), 'editTodoInline must merge onto the live payload');
+      assert(todosSrc.includes('sharedTodoPayload(todo, { snooze_until: snoozeUntil.toISOString() })'), 'doSnooze must merge onto the live payload');
+      assert(todosSrc.includes('sharedTodoPayload(todo, { snooze_until: null })'), 'unsnoozeTodo must merge onto the live payload');
+      assert(todosSrc.includes('sharedTodoPayload(todo, { attachments: payload })'), 'saveTodoAttachments must merge onto the live payload');
+      assert(!todosSrc.includes('const currentPayload = { text: todo.text'), 'no from-scratch currentPayload may remain');
+      assert(!todosSrc.includes('payload: { text: todo.text, category: todo.category'), 'no from-scratch payload literal may remain');
+      assert(!todosSrc.includes('todo._shared?.payload'), 'attachment writes must not read the _shared snapshot');
     });
 
     test('habits: attachment UI is wired, Drive-gated, and shared habits carry attachments top-level', () => {

@@ -1959,14 +1959,14 @@ body.demo-mode.install-mode .app-header{top:calc(var(--demo-banner-h,36px) + var
 .list-item-note{font-size:0.75rem;color:var(--muted);margin-top:2px;white-space:pre-line;}
 .item-attachments{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
 .attachment-chip{display:inline-flex;align-items:center;gap:2px;font-size:0.75rem;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:2px 4px;max-width:100%;}
-.attachment-chip a{display:inline-flex;align-items:center;gap:3px;color:var(--accent);text-decoration:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.attachment-chip a, .attachment-chip .attachment-link{display:inline-flex;align-items:center;gap:3px;color:var(--accent);text-decoration:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .attachment-chip a:hover{text-decoration:underline;}
 .attachment-chip .attachment-size{color:var(--muted);flex-shrink:0;}
 .attachment-chip button{background:none;border:none;cursor:pointer;padding:2px;border-radius:4px;color:var(--muted);flex-shrink:0;}
 .attachment-chip button:hover{background:var(--surface);color:var(--text);}
 .attachment-chip.pending{border-style:dashed;}
 .attachment-chip.error{border-color:var(--red);}
-.attachment-chip .attachment-name{display:inline-flex;align-items:center;gap:3px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.attachment-chip .attachment-name{display:inline-block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .att-progress-ring{flex-shrink:0;}
 .att-progress-ring-track{fill:none;stroke:var(--border);stroke-width:2;}
 .att-progress-ring-fg{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;transform:rotate(-90deg);transform-origin:8px 8px;}
@@ -2507,6 +2507,10 @@ a.deep-link { text-decoration: underline; text-decoration-style: dotted; cursor:
   margin: 8px 0 4px;
   transition: box-shadow 0.2s ease;
 }
+/* The row wrapper is a flex item of the column list: without
+   min-width:0 a long unbroken attachment name pushes the whole row
+   wider than the panel (v2.32.200). */
+.cal-row-wrap{min-width:0;}
 .cal-group-label {
   font-size: 0.72rem;
   font-weight: 700;
@@ -2814,9 +2818,12 @@ button.cal-row { cursor: pointer; }
 .modal-wide.cal-day-modal { width: 1200px; max-width: 94vw; }
 .cal-day-sections {
   display: grid;
-  /* Columns never narrower than 360px: below ~840px viewport the grid
-     drops to a single column instead of squeezing two narrow ones. */
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  /* Columns never narrower than 360px — except on a phone, where the
+     panel itself is narrower than that: min(360px, 100%) lets the
+     single column shrink to the container instead of overflowing it
+     by 27px (v2.32.200). Below ~840px viewport the grid drops to a
+     single column instead of squeezing two narrow ones. */
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
   gap: 12px;
   align-items: start;
 }

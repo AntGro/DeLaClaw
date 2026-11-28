@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-28T03:00:45.050Z from 50 modules (v2.32.200). Total LOC 41073. Do not hand-edit.
+> Generated 2026-11-28T10:14:51.487Z from 50 modules (v2.32.200). Total LOC 41106. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -35,9 +35,9 @@
 | utils | 1064 | flashcards,x | calendar-pure,i18n,icons,sections-pure | - | esc:8,window:6 |
 | calendar | 1056 | - | attachments,calendar-pure,habits,i18n | main.js,welcome.js | esc:26,window:8 |
 | events | 845 | events | attachments,calendar-pure,i18n,icons | main.js | esc:20,pendingSet,window:8 |
+| attachments | 586 | - | i18n,icons,state,utils | calendar.js,events.js,habits.js,lists.js | esc:15,pendingSet |
 | sections-pure | 570 | flashcard_decks,flashcards,texts |  | calendar.js,flashcards.js,habits.js,lists.js | - |
 | batch-import | 564 | - | calendar-pure,icons,import-pure,state | - | esc:14 |
-| attachments | 553 | - | i18n,icons,state,utils | calendar.js,events.js,habits.js,lists.js | esc:15,pendingSet |
 | delegation | 546 | - |  | - | window:1 |
 | calendar-pure | 500 | - |  | batch-import.js,birthdays.js,calendar-sync.js,calendar.js | - |
 | demo-chooser | 488 | - | calendar-pure,habits,i18n,icons | - | - |

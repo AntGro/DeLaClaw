@@ -3558,8 +3558,8 @@ test('Day modal is wide enough for three columns, and inline edits size to conte
   const css = fs.readFileSync(path.resolve(__dirname, '..', 'style.css'), 'utf8');
   assert(css.includes('.modal-wide.cal-day-modal { width: 1200px; max-width: 94vw; }'),
     'the day modal must be 1200px wide on desktop so its three columns are not squeezed');
-  assert(css.includes('grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));'),
-    'day-modal columns must be at least 360px wide, so narrow viewports drop to a single column instead of two squeezed ones');
+  assert(css.includes('grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));'),
+    'day-modal columns must be at least 360px wide, so narrow viewports drop to a single column instead of two squeezed ones — except on a phone, where the column yields to the panel instead of overflowing it (v2.32.200)');
   assert(css.includes('.modal.modal-wide textarea:not(.task-edit-input){min-height:200px;resize:none;}'),
     'the wide-modal textarea floor must not apply to inline-edit fields, which size to their content');
   assert(css.includes('.modal textarea:not(.task-edit-input){width:100%;'),
@@ -10332,7 +10332,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const start = attJs.indexOf('// ── Pure attachment helpers ──');
       const end = attJs.indexOf('// ── End pure attachment helpers ──');
       assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in attachments.js');
-      return new Function(`${attJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, ownAttachmentFiles, referencedFileIdsFromItems, batchExcludeKeys, memberDisplayName };`)();
+      return new Function(`${attJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, ownAttachmentFiles, referencedFileIdsFromItems, batchExcludeKeys, memberDisplayName, simpleCaptureName };`)();
     }
 
     function loadAttachmentQueue() {
@@ -10396,6 +10396,62 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'a non-string uploaded_by must be dropped');
       assert(normalizeAttachments([{ ...good, uploaded_by: '' }]).length === 0,
         'an empty uploaded_by must be dropped');
+    });
+
+    test('attachments: a camera capture taken on the fly gets a simple name (v2.32.200)', () => {
+      const { simpleCaptureName } = loadAttachmentHelpers();
+      const cap = (name, type) => simpleCaptureName({ name, type });
+      // The observed iOS capture shape: att.d_<token> with an image type.
+      assert(cap('att.d_Z1XBUY2AdkVNNbrFUvnnlG9G8h1OCEmx8HvfkllC.jpg', 'image/jpeg') === 'Photo.jpg',
+        'a JPEG capture must become Photo.jpg');
+      assert(cap('att.d_Z1XBUY2AdkVNNbrFUvnnlG9G8h1OCEmx8HvfkllC', 'image/heic') === 'Photo.heic',
+        'a HEIC capture with no suffix takes the extension from its type');
+      assert(cap('att.d_Z1XBUY2AdkVNNbrFUvnnlG9G8h1OCEmx8HvfkllC.mov', 'video/quicktime') === 'Video.mov',
+        'a video capture must become Video.mov');
+      assert(cap('att.d_Z1XBUY2AdkVNNbrFUvnnlG9G8h1OCEmx8HvfkllC.png', '') === 'Photo.png',
+        'a capture with no reported type falls back to its suffix');
+      // Everything else is left alone.
+      assert(cap('holiday.jpg', 'image/jpeg') === 'holiday.jpg', 'a real filename must not be renamed');
+      assert(cap('IMG_20261128_025600.jpg', 'image/jpeg') === 'IMG_20261128_025600.jpg', 'a camera filename must not be renamed');
+      assert(cap('att.d_Z1XBUY2AdkVNNbrFUvnnlG9G8h1OCEmx8HvfkllC.pdf', 'application/pdf') === 'att.d_Z1XBUY2AdkVNNbrFUvnnlG9G8h1OCEmx8HvfkllC.pdf',
+        'a generated name on a non-photo file must not be renamed');
+      assert(cap('att.d_short.jpg', 'image/jpeg') === 'att.d_short.jpg', 'a short token is not a capture name');
+      assert(cap('att.d_Z1XBUY2AdkVNNbrFUvnnlG9G8h1OCEmx8HvfkllC', '') === 'att.d_Z1XBUY2AdkVNNbrFUvnnlG9G8h1OCEmx8HvfkllC',
+        'a capture with neither type nor suffix is left alone rather than guessed');
+    });
+
+    test('attachments: saved chips wrap the name so it can shrink, and the day-panel row cannot be pushed wide (v2.32.200)', () => {
+      const attSrc = jsFiles['attachments.js'];
+      // The name used to be a bare text node inside the flex link — an
+      // anonymous item whose minimum width is the whole unbroken string,
+      // so a long filename pushed the row past the panel edge with no
+      // ellipsis. Both saved branches now wrap it in a real element.
+      assert(attSrc.includes('<span class="attachment-name">${esc(a.name)}</span>'),
+        'both saved chip branches must wrap the name in .attachment-name');
+      assert((attSrc.match(/<span class="attachment-name">\$\{esc\(a\.name\)\}<\/span>/g) || []).length === 2,
+        'the name span must appear in exactly the two saved branches');
+      // The queue renames a capture before queuing, so the pending chip,
+      // the Drive file and the saved record all carry the simple name.
+      assert(attSrc.includes('const renamed = simpleCaptureName(file);'),
+        'attach() must rename a capture before queuing it');
+      assert(attSrc.includes('new File([file], renamed, { type: file.type, lastModified: file.lastModified })'),
+        'attach() must re-wrap the renamed file preserving type and date');
+      const css = fs.readFileSync(STYLE_FILE, 'utf-8');
+      // inline-block is a block container, so the declared ellipsis
+      // renders; inline-flex made the name text an anonymous item the
+      // ellipsis could never reach.
+      assert(css.includes('.attachment-chip .attachment-name{display:inline-block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'),
+        '.attachment-name must be a block container so ellipsis renders');
+      assert(css.includes('.attachment-chip a, .attachment-chip .attachment-link{display:inline-flex;'),
+        'the non-Drive chip span must share the link flex rule');
+      assert(css.includes('.cal-row-wrap{min-width:0;}'),
+        'the day-panel row wrapper must not let a wide child push it past the panel');
+      // The day-panel sections grid floored its columns at 360px even
+      // when the panel itself is narrower — on a 390px phone the whole
+      // Events section sat 27px past the list edge, so even a capped
+      // chip was cut off. The floor now yields to the container.
+      assert(css.includes('grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));'),
+        'the day-panel sections grid must let its column shrink to the container on phones');
     });
 
     test('lists: listItemMatchesSearch matches text, note and attachment names', () => {

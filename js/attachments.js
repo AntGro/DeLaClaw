@@ -100,6 +100,33 @@ function batchExcludeKeys(items) {
 // the member is not found (left the group, or the id predates the row).
 // The invited label is the fallback — it is what the UI shows for a
 // member with no display name yet.
+// Pure: the display name for a file picked for upload. A photo or
+// video taken on the fly arrives with a generated name (a camera
+// capture reports e.g. att.d_<token>) instead of a human filename —
+// give it a simple name from its type, so the chip shows Photo.jpg
+// instead of the id. Only the generated shape is renamed; any real
+// filename — including a hash-named file — is left alone, and a
+// generated name on a non-photo/video file is left alone too.
+const CAPTURE_NAME_RE = /^att\.d_[A-Za-z0-9_-]{16,}(\.[A-Za-z0-9]+)?$/;
+const CAPTURE_EXT_BY_TYPE = {
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/heic': '.heic',
+  'image/heif': '.heic', 'image/webp': '.webp', 'image/gif': '.gif',
+  'video/mp4': '.mp4', 'video/quicktime': '.mov',
+};
+const CAPTURE_PHOTO_EXTS = ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp', '.gif'];
+const CAPTURE_VIDEO_EXTS = ['.mp4', '.mov'];
+function simpleCaptureName(file) {
+  const name = file?.name || '';
+  if (!CAPTURE_NAME_RE.test(name)) return name;
+  const type = (file.type || '').toLowerCase();
+  const dot = name.lastIndexOf('.');
+  const extFromName = dot > 0 ? name.slice(dot).toLowerCase() : '';
+  const ext = CAPTURE_EXT_BY_TYPE[type] || extFromName;
+  const isVideo = type.startsWith('video/') || CAPTURE_VIDEO_EXTS.includes(ext);
+  const isPhoto = type.startsWith('image/') || CAPTURE_PHOTO_EXTS.includes(ext);
+  if (!isVideo && !isPhoto) return name;
+  return (isVideo ? 'Video' : 'Photo') + (ext === '.jpeg' ? '.jpg' : ext);
+}
 function memberDisplayName(members, memberId) {
   const m = (members || []).find(x => x && x.member_id === memberId);
   return m?.display_name || m?.invited_label || null;
@@ -236,8 +263,8 @@ function attachmentsHtml(item, { pending = [], actions = null, removable = true,
     return `
       <span class="attachment-chip">
         ${isDriveAttachmentUrl(a.url)
-          ? `<a href="${escQ(a.url)}" target="_blank" rel="noopener" title="${escQ(title)}">${lucideIcon('paperclip', 12)} ${esc(a.name)} <span class="attachment-size">${esc(formatFileSize(a.size))}</span></a>`
-          : `<span title="${escQ(title)}">${lucideIcon('paperclip', 12)} ${esc(a.name)} <span class="attachment-size">${esc(formatFileSize(a.size))}</span></span>`}
+          ? `<a href="${escQ(a.url)}" target="_blank" rel="noopener" title="${escQ(title)}">${lucideIcon('paperclip', 12)}<span class="attachment-name">${esc(a.name)}</span> <span class="attachment-size">${esc(formatFileSize(a.size))}</span></a>`
+          : `<span class="attachment-link" title="${escQ(title)}">${lucideIcon('paperclip', 12)}<span class="attachment-name">${esc(a.name)}</span> <span class="attachment-size">${esc(formatFileSize(a.size))}</span></span>`}
         ${removable && actions?.remove ? `<button data-action="${actions.remove}" data-id="${esc(item.id)}" data-attachment-id="${esc(a.drive_file_id)}" title="${t(`${i18nPrefix}.remove_attachment`)}" aria-label="${t(`${i18nPrefix}.remove_attachment`)}">${lucideIcon('x', 12)}</button>` : ''}
       </span>`;}).join('')}${pending.map(p => pendingAttachmentChipHtml(item, p, actions, i18nPrefix)).join('')}</div>`;
 }
@@ -313,7 +340,13 @@ function createAttachmentQueue({ getItem, getLocalItems, saveAttachments, render
       if (!pending) { pending = new Map(); _pendingAttachments.set(itemId, pending); }
       for (const file of files) {
         const id = `pending-${++_pendingAttachmentSeq}`;
-        pending.set(id, { id, file, progress: 0, status: 'queued', controller: new AbortController(), error: null });
+        // A capture taken on the fly carries a generated name — rename
+        // it before queuing so the pending chip, the Drive file and the
+        // saved record all carry the simple name (v2.32.200).
+        const renamed = simpleCaptureName(file);
+        const upFile = renamed === file.name ? file
+          : new File([file], renamed, { type: file.type, lastModified: file.lastModified });
+        pending.set(id, { id, file: upFile, progress: 0, status: 'queued', controller: new AbortController(), error: null });
       }
       render();
       processQueue(item);

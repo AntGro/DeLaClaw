@@ -31,7 +31,7 @@ Uploads go to the uploader's Drive, in a per-item folder `DeLaClaw/attachments/<
 
 The chip appears immediately with a progress ring; uploads run in the background while the user navigates elsewhere, and one file uploads at a time per item. A failed upload leaves an error chip with retry; cancelling is silent. Pending state is memory-only, so a reload drops the chip and kills the upload.
 
-Same-name files are renamed silently: the first keeps the plain name, later ones take `(1)`, `(2)`, and so on, with the suffix splitting only the last extension. Deleting a chip frees the name.
+Same-name files are renamed silently: the first keeps the plain name, later ones take `(1)`, `(2)`, and so on, with the suffix splitting only the last extension. Deleting a chip frees the name. A photo or video taken on the fly arrives with a generated name (a camera capture reports e.g. `att.d_<id>`) — it is stored as `Photo.jpg` / `Video.mov` instead, from its type; any real filename is left alone.
 
 The attachment record is the source of truth: an item's attachments are whatever its records point at (`drive_file_id`), never the contents of its per-item folder. Files never move when an item's identity changes — sharing an item, unsharing it, leaving with keep-copies, or copying it to personal all carry the records as-is; only new uploads go to the folder named after the item's current key. The folder matters for two things only: name dedupe at upload time, and trashing the folder (with its orphans) on delete.
 

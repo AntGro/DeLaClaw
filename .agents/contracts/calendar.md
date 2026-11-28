@@ -76,8 +76,11 @@ for the Google Calendar mirror.)
   in the toolbar-right next to the + add button — not with the funnel
   filter on the left. The placeholder/title come from `common.search`
   via the `searchMap` in main.js.
-- Matching is title/name only, case-insensitive substring on the
-  collected `title` (`(ev.title || '').toLowerCase().includes(search)`).
+- Matching is title/name plus attachment names, case-insensitive
+  substring on the collected `title` and on each collected
+  attachment's `name` (`(ev.attachments || []).some(...)`, v2.32.199 —
+  only events carry attachments in the collected objects; notes are
+  never matched).
   Notes are never matched — they are not collected — and neither are
   category names.
 - The query is session-only (`calSearch` module var, never persisted):
@@ -126,6 +129,41 @@ for the Google Calendar mirror.)
   re-render the panel (`refreshBirthdays` dispatches
   `birthdays-changed`, mirroring `events-changed`). Same-day refreshes
   preserve the panel's scroll position.
+
+## Attachments (v2.32.199)
+
+- Same mechanism as lists/TODOs/habits (see the lists contract for the
+  shared model): one record shape `{drive_file_id, name, size, url,
+  uploaded_by}`; canonical storage is a JSON string in the event's
+  `attachments` TEXT column (migration 2.32.199, both backends) and a real
+  array in the sharing payload.
+- A shared event's records travel in the payload, like a TODO's.
+  `eventPayload(ev)` carries them, so share, unshare and copy carry them
+  — and the edit merge reads the live payload via `sharedEventPayload`
+  and throws when unreadable, never a stub, so saving an edit never
+  wipes attachments added by another member (the v2.32.194 pattern,
+  event-shaped; the attachment save uses the same helper).
+- Attach lives in the **edit modal only** (paperclip + chips in
+  `#editEventAttachments`, Drive-only gate): a new event has no row until
+  it is saved, so the add modal cannot attach. The queue's render
+  re-renders the modal section and the calendar behind it, so the day
+  panel updates without waiting for a save.
+- The **day panel** shows read-only chips under the event row (the chips
+  sit after the row's `<button>`, never inside it). The grid day cells
+  and the Welcome strip show no chips. Calendar search matches
+  attachment names as well as titles.
+- Share grants each file reader first and rolls the grants back on any
+  later failure (pointer-insert failure, upload failure after the swap).
+  Unshare and copy-to-personal carry the records; unshare revokes the
+  group's access to the unsharer's own files only. Leaving/deleting a
+  group with keep-copies carries the records (`_convertGroupItemsToPersonal`
+  events branch, v2.32.199). Deleting an event trashes only the deleter's
+  own files — the shared path already awaits the remote delete first, so
+  there is no delete-ordering hazard here. The join-backfill sweep scans
+  events alongside lists, TODOs and habits.
+- The Google Calendar mirror is untouched: attachment-only changes
+  no-op (attachments are not in the shared-event fingerprint), and no
+  attachment link is written into the mirrored description.
 
 ## Explicitly out of scope (deferred by the user, Oct 24, 2026)
 

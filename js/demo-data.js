@@ -150,7 +150,7 @@ function en() {
   ];
 
   const events = [
-    { id: 'demo-ev-001', title: 'Dinner with Alex', note: 'Try the new Italian place on Green Street', all_day: 0, start_ts: wallTimeToInstant(dateOnly(0), '19:00', _tz), end_ts: wallTimeToInstant(dateOnly(0), '20:30', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-ev-001', title: 'Dinner with Alex', note: 'Try the new Italian place on Green Street', all_day: 0, start_ts: wallTimeToInstant(dateOnly(0), '19:00', _tz), end_ts: wallTimeToInstant(dateOnly(0), '20:30', _tz), start_date: null, end_date: null, timezone: _tz, attachments: [{ drive_file_id: 'demo-attachment-005', name: 'dinner-reservation.pdf', size: 96340, url: 'https://drive.google.com/file/d/demo-dinner-reservation/view', uploaded_by: 'demo' }], created_at: d(-2), updated_at: d(-2) },
     { id: 'demo-ev-002', title: 'Book club meeting', note: 'Discussing "Klara and the Sun" — bring notes', all_day: 0, start_ts: wallTimeToInstant(dateOnly(1), '18:30', _tz), end_ts: wallTimeToInstant(dateOnly(1), '20:00', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-3), updated_at: d(-3) },
     { id: 'demo-ev-003', title: 'Weekend trip to the coast', note: 'Pack Friday evening; check the train times', all_day: 1, start_ts: null, end_ts: null, start_date: dateOnly(3), end_date: dateOnly(5), timezone: null, created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-ev-004', title: 'Dentist appointment', note: 'Bring insurance card', all_day: 0, start_ts: wallTimeToInstant(dateOnly(7), '09:30', _tz), end_ts: wallTimeToInstant(dateOnly(7), '10:15', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-10), updated_at: d(-10) },
@@ -266,7 +266,7 @@ function fr() {
   ];
 
   const events = [
-    { id: 'demo-ev-001', title: 'Dîner avec Alex', note: 'Essayer le nouveau restaurant italien rue Verte', all_day: 0, start_ts: wallTimeToInstant(dateOnly(0), '19:00', _tz), end_ts: wallTimeToInstant(dateOnly(0), '20:30', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-ev-001', title: 'Dîner avec Alex', note: 'Essayer le nouveau restaurant italien rue Verte', all_day: 0, start_ts: wallTimeToInstant(dateOnly(0), '19:00', _tz), end_ts: wallTimeToInstant(dateOnly(0), '20:30', _tz), start_date: null, end_date: null, timezone: _tz, attachments: [{ drive_file_id: 'demo-attachment-005', name: 'reservation-diner.pdf', size: 96340, url: 'https://drive.google.com/file/d/demo-dinner-reservation/view', uploaded_by: 'demo' }], created_at: d(-2), updated_at: d(-2) },
     { id: 'demo-ev-002', title: 'Club de lecture', note: 'On discute de « Klara et le Soleil » — apporter ses notes', all_day: 0, start_ts: wallTimeToInstant(dateOnly(1), '18:30', _tz), end_ts: wallTimeToInstant(dateOnly(1), '20:00', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-3), updated_at: d(-3) },
     { id: 'demo-ev-003', title: 'Week-end à la côte', note: 'Préparer les bagages vendredi soir ; vérifier les horaires de train', all_day: 1, start_ts: null, end_ts: null, start_date: dateOnly(3), end_date: dateOnly(5), timezone: null, created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-ev-004', title: 'Rendez-vous dentiste', note: 'Apporter la carte Vitale', all_day: 0, start_ts: wallTimeToInstant(dateOnly(7), '09:30', _tz), end_ts: wallTimeToInstant(dateOnly(7), '10:15', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-10), updated_at: d(-10) },
@@ -382,7 +382,7 @@ function es() {
   ];
 
   const events = [
-    { id: 'demo-ev-001', title: 'Cena con Alex', note: 'Probar el nuevo restaurante italiano de la calle Verde', all_day: 0, start_ts: wallTimeToInstant(dateOnly(0), '19:00', _tz), end_ts: wallTimeToInstant(dateOnly(0), '20:30', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-ev-001', title: 'Cena con Alex', note: 'Probar el nuevo restaurante italiano de la calle Verde', all_day: 0, start_ts: wallTimeToInstant(dateOnly(0), '19:00', _tz), end_ts: wallTimeToInstant(dateOnly(0), '20:30', _tz), start_date: null, end_date: null, timezone: _tz, attachments: [{ drive_file_id: 'demo-attachment-005', name: 'reserva-cena.pdf', size: 96340, url: 'https://drive.google.com/file/d/demo-dinner-reservation/view', uploaded_by: 'demo' }], created_at: d(-2), updated_at: d(-2) },
     { id: 'demo-ev-002', title: 'Club de lectura', note: 'Hablamos de «Klara y el Sol» — llevar apuntes', all_day: 0, start_ts: wallTimeToInstant(dateOnly(1), '18:30', _tz), end_ts: wallTimeToInstant(dateOnly(1), '20:00', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-3), updated_at: d(-3) },
     { id: 'demo-ev-003', title: 'Fin de semana en la costa', note: 'Preparar las maletas el viernes por la noche; revisar los horarios de tren', all_day: 1, start_ts: null, end_ts: null, start_date: dateOnly(3), end_date: dateOnly(5), timezone: null, created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-ev-004', title: 'Cita con el dentista', note: 'Llevar la tarjeta del seguro', all_day: 0, start_ts: wallTimeToInstant(dateOnly(7), '09:30', _tz), end_ts: wallTimeToInstant(dateOnly(7), '10:15', _tz), start_date: null, end_date: null, timezone: _tz, created_at: d(-10), updated_at: d(-10) },

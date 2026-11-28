@@ -625,6 +625,13 @@ async function _convertGroupItemsToPersonal(groupId) {
         enriched.start_date = p.start_date || null;
         enriched.end_date = p.end_date || null;
         enriched.timezone = p.timezone || null;
+        // Keep the original attachments, still pointing at the shared files
+        // (v2.32.199, same as lists since v2.32.136 and TODOs/habits since
+        // v2.32.195) — the grants survive leaving, so the links keep
+        // opening. The records keep their original uploaded_by, so a later
+        // delete of the kept copy never trashes another member's file.
+        const atts = serializeAttachments(p.attachments);
+        if (atts) enriched.attachments = atts;
       }
       await dbThrow(
         state.db.from('events').update({ ...nullShared, ...enriched }).eq('id', row.id),

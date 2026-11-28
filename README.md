@@ -22,7 +22,7 @@ DeLaClaw is a single-page productivity dashboard that runs entirely in the brows
 | **TODOs** | Categorized tasks with 5 priority levels, due dates, snooze, drag-and-drop reordering, file attachments |
 | **Habits** | Recurring habits with flexible scheduling (structured rules + free text), completion tracking, streaks, file attachments |
 | **Memory** | Spaced repetition (FSRS algorithm) with deck organization and text memorization mode |
-| **Calendar** | Month, week, day and year views bringing together TODOs, habits, birthdays and your own events, with per-type filters |
+| **Calendar** | Month, week, day and year views bringing together TODOs, habits, birthdays and your own events (with file attachments), with per-type filters |
 | **Lists** | General-purpose checklists with file attachments (Google Drive) |
 | **Group** | [COMING] Sharing-group management: members, invites, shared-item counts |
 

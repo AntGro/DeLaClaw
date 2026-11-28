@@ -366,6 +366,10 @@
       case 'remove-habit-attachment': callWindow('removeHabitAttachment', [getId(el), el.dataset.attachmentId, el]); break;
       case 'cancel-habit-attachment': callWindow('cancelHabitAttachment', [getId(el), el.dataset.pendingId, el]); break;
       case 'retry-habit-attachment': callWindow('retryHabitAttachment', [getId(el), el.dataset.pendingId, el]); break;
+      case 'attach-to-event': callWindow('attachToEvent', [getId(el), el]); break;
+      case 'remove-event-attachment': callWindow('removeEventAttachment', [getId(el), el.dataset.attachmentId, el]); break;
+      case 'cancel-event-attachment': callWindow('cancelEventAttachment', [getId(el), el.dataset.pendingId, el]); break;
+      case 'retry-event-attachment': callWindow('retryEventAttachment', [getId(el), el.dataset.pendingId, el]); break;
       case 'close-add-list': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddListModal', []); break;
       case 'save-new-list': callWindow('saveNewList', []); break;
       case 'close-edit-list': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditListModal', []); break;

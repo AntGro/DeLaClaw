@@ -39,7 +39,7 @@ Deleting an item trashes only the deleter's own recorded files and their own per
 
 The group rules — grants, join-backfill, revoke on unshare, keep-copies — live in [Sharing](sharing.md#attachments).
 
-TODOs and Habits support the same mechanism (v2.32.193): the paperclip sits on the TODO/habit row, chips render under it, and the upload, record and delete rules above apply unchanged. Two differences: a TODO's records travel in the sharing payload like a list item's, while a habit's travel top-level on the shared habit; and on the Welcome page both show read-only chips — attach and remove happen only on their own pages. On touch devices Attach is in the kebab menu for TODOs and Habits (Done + Edit stay the primaries), while list items keep Attach as a primary.
+TODOs and Habits support the same mechanism (v2.32.193): the paperclip sits on the TODO/habit row, chips render under it, and the upload, record and delete rules above apply unchanged. Two differences: a TODO's records travel in the sharing payload like a list item's, while a habit's travel top-level on the shared habit; and on the Welcome page both show read-only chips — attach and remove happen only on their own pages. On touch devices Attach is in the kebab menu for TODOs and Habits (Done + Edit stay the primaries), while list items keep Attach as a primary. Events support the same mechanism (v2.32.199): the paperclip and chips live in the edit modal (a new event has no row to attach to yet), the day panel shows read-only chips under the event row, and a shared event's records travel in the payload like a TODO's — the edit merge carries them, so saving an edit never wipes them.
 
 ## Sharing
 

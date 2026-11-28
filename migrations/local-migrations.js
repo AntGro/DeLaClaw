@@ -850,4 +850,10 @@ export const LOCAL_MIGRATIONS = {
     ALTER TABLE todos ADD COLUMN attachments TEXT;
     ALTER TABLE habits ADD COLUMN attachments TEXT;
   `,
+
+  // 2.32.199: event attachments — a JSON array of
+  // {drive_file_id, name, size, url, uploaded_by} stored as TEXT.
+  '2.32.199': `
+    ALTER TABLE events ADD COLUMN attachments TEXT;
+  `,
 };

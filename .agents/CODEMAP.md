@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-28T02:29:53.860Z from 50 modules (v2.32.198). Total LOC 40860. Do not hand-edit.
+> Generated 2026-11-28T02:50:28.318Z from 50 modules (v2.32.199). Total LOC 41003. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -27,18 +27,18 @@
 |--------|-----|--------|---------|------------|-------|
 | main | 4144 | daily_visits,settings,todos | ./migrations/version-compare,agents-ui,backend-logos,birthdays | - | esc:12,guard+pendingSet,window:8 |
 | sharing-drive | 2735 | groups | drive-folders,i18n,sharing-envelope,sharing-file-reconcile | main.js,sharing.js | - |
-| i18n | 2576 | - |  | agents-ui.js,attachments.js,birthdays.js,calendar-sync.js | pendingSet |
+| i18n | 2600 | - |  | agents-ui.js,attachments.js,birthdays.js,calendar-sync.js | pendingSet |
 | drive | 2063 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | item-utils | 1691 | - | db,i18n,icons,state | agents-ui.js,attachments.js,batch-import.js,birthdays.js | - |
-| sharing-ui | 1280 | events,habit_categories,habit_completions,habits,list_items,todo_categories,todos | attachments,backend-logos,i18n,icons | calendar.js,events.js,groups.js,habits.js | esc:38,guard+pendingSet,window:8 |
+| sharing-ui | 1287 | events,habit_categories,habit_completions,habits,list_items,todo_categories,todos | attachments,backend-logos,i18n,icons | calendar.js,events.js,groups.js,habits.js | esc:38,guard+pendingSet,window:8 |
 | calendar-sync | 1269 | birthdays,events,gcal_sync,habits,settings,todos | calendar-pure,drive-folders,habits,i18n | main.js | - |
 | utils | 1064 | flashcards,x | calendar-pure,i18n,icons,sections-pure | - | esc:8,window:6 |
-| calendar | 1049 | - | calendar-pure,habits,i18n,icons | main.js,welcome.js | esc:26,window:8 |
-| events | 744 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:19,pendingSet,window:8 |
+| calendar | 1056 | - | attachments,calendar-pure,habits,i18n | main.js,welcome.js | esc:26,window:8 |
+| events | 845 | events | attachments,calendar-pure,i18n,icons | main.js | esc:20,pendingSet,window:8 |
 | sections-pure | 570 | flashcard_decks,flashcards,texts |  | calendar.js,flashcards.js,habits.js,lists.js | - |
 | batch-import | 564 | - | calendar-pure,icons,import-pure,state | - | esc:14 |
-| attachments | 553 | - | i18n,icons,state,utils | habits.js,lists.js,sharing-ui.js,todos.js | esc:15,pendingSet |
-| delegation | 542 | - |  | - | window:1 |
+| attachments | 553 | - | i18n,icons,state,utils | calendar.js,events.js,habits.js,lists.js | esc:15,pendingSet |
+| delegation | 546 | - |  | - | window:1 |
 | calendar-pure | 500 | - |  | batch-import.js,birthdays.js,calendar-sync.js,calendar.js | - |
 | demo-chooser | 488 | - | calendar-pure,habits,i18n,icons | - | - |
 | hero | 448 | - | logo | main.js | - |

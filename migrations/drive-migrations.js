@@ -745,4 +745,12 @@ export const DRIVE_MIGRATIONS = {
       if (Array.isArray(row.attachments)) row.attachments = JSON.stringify(row.attachments);
     }
   },
+
+  '2.32.199': async (store) => {
+    // 2.32.199: event attachments — same JSON-string canonical storage
+    // as TODOs/habits (2.32.193) and list_items (2.32.122).
+    for (const row of (store.events || [])) {
+      if (Array.isArray(row.attachments)) row.attachments = JSON.stringify(row.attachments);
+    }
+  },
 };

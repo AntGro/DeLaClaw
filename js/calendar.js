@@ -12,6 +12,7 @@ import { lucideIcon } from './icons.js';
 import { sharedBadge } from './sharing-ui.js';
 import { t, getLang } from './i18n.js';
 import { getTodos, catIdForTodo, getCategoryColor, getTodoCatPath, getTodoCatOrderKey, editTodoInline } from './todos.js';
+import { normalizeAttachments, attachmentsHtml } from './attachments.js';
 import { computeNextDue, isStructuredRule, normalizeFrequencyRule, catIdForHabit, getHabitCategoryColor, getHabitCatPath, getHabitCatOrderKey, isAutoHabit, editHabitInline } from './habits.js';
 import { compareOrderKeys } from './sections-pure.js';
 import { captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
@@ -231,6 +232,7 @@ function collectRangeEvents(start, end, show = calShow, search = '') {
         start_ts: ev.start_ts || null, end_ts: ev.end_ts || null,
         start_date: ev.start_date || null, end_date: ev.end_date || null,
         timezone: ev.timezone || null,
+        attachments: normalizeAttachments(ev.attachments),
         startTimeLabel: ev.all_day ? '' : instantToTimeStr(ev.start_ts, viewerTz),
         shared_id: ev.shared_id || null, shared_group_id: ev.shared_group_id || null,
       };
@@ -248,7 +250,8 @@ function collectRangeEvents(start, end, show = calShow, search = '') {
   for (const evs of map.values()) evs.sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type]);
   if (search) {
     for (const [date, evs] of map) {
-      const kept = evs.filter(ev => (ev.title || '').toLowerCase().includes(search));
+      const kept = evs.filter(ev => (ev.title || '').toLowerCase().includes(search)
+        || (ev.attachments || []).some(a => (a.name || '').toLowerCase().includes(search)));
       if (kept.length) map.set(date, kept);
       else map.delete(date);
     }
@@ -739,11 +742,15 @@ function calOverdueSub(ev) {
 
 function dayPanelRow(ev, dateStr) {
   if (ev.type === 'event') {
-    return `<button class="cal-row" data-action="calendar-event-edit" data-id="${esc(ev.id)}">
+    // Read-only chips under the row, not inside the button (a link inside
+    // a button is invalid HTML and the button's click would fire too).
+    // The wrapper stretches in the panel's flex column; the button stays
+    // full-width inside it.
+    return `<div class="cal-row-wrap"><button class="cal-row" data-action="calendar-event-edit" data-id="${esc(ev.id)}">
       <span class="cal-row-avatar cal-row-icon">${lucideIcon(ev.allDay ? 'calendar-days' : 'clock', 15)}</span>
       <span class="cal-row-main">${calSharedBadge(ev)}<strong>${renderMd(ev.title)}</strong><span class="cal-row-sub">${esc(calEventSub(ev))}</span></span>
       ${lucideIcon('pencil', 15)}
-    </button>`;
+    </button>${attachmentsHtml({ id: ev.id, attachments: ev.attachments, shared_group_id: ev.shared_group_id }, { removable: false, i18nPrefix: 'events' })}</div>`;
   }
   if (ev.type === 'birthday') {
     const thumb = ev.avatar

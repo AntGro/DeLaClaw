@@ -4,6 +4,7 @@ import { esc, showToast, showConfirmAction, fetchAll } from './utils.js';
 import { t, getLang } from './i18n.js';
 import { wallTimeToInstant, instantToDateStr, instantToTimeStr, localTimeZone, toDateStr, parseLocalDate, gmtOffsetLabel } from './calendar-pure.js';
 import { openSharePopover } from './sharing-ui.js';
+import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
 
 // ===================================================================
 // EVENTS — user calendar events (no page: events live on the Calendar)
@@ -36,6 +37,7 @@ async function refreshEvents() {
     return;
   }
   let rows = data || [];
+  for (const ev of rows) ev.attachments = normalizeAttachments(ev.attachments);
 
   // Enrich shared pointers with live payload data (TODO pattern).
   if (state.sharing) {
@@ -47,6 +49,7 @@ async function refreshEvents() {
       const sh = sharedById.get(ev.shared_id);
       if (sh) {
         applyPayload(ev, sh.payload || {});
+        ev.attachments = normalizeAttachments(sh.payload?.attachments);
         ev._shared = sh;
         if (ev.shared_group_id) groupIds.add(ev.shared_group_id);
       }
@@ -98,6 +101,10 @@ function eventPayload(ev) {
     start_date: ev.start_date || null,
     end_date: ev.end_date || null,
     timezone: ev.timezone || null,
+    // The records travel in the payload (a real array, like TODOs) — so
+    // share, unshare, copy and the edit merge all carry them, and a
+    // shared edit never wipes them (v2.32.194 lesson, TODO-shaped).
+    attachments: normalizeAttachments(ev.attachments),
   };
 }
 
@@ -197,6 +204,7 @@ function editEventModalHTML() {
     <h2>${lucideIcon('pencil', 20)} ${t('events.edit_event')}</h2>
     <input type="hidden" id="editEventId">
     ${eventFieldsHTML('edit')}
+    <div class="event-attachments" id="editEventAttachments"></div>
     <div class="modal-actions">
       <button class="modal-delete" data-action="delete-event" id="editEventDeleteBtn" data-id="" title="${t('common.delete')}" aria-label="${t('common.delete')}">${lucideIcon('trash-2', 15)}</button>
       <span id="editEventShareSlot"></span>
@@ -384,6 +392,7 @@ function openEditEventModal(id) {
   fillEventForm('edit', ev, null);
   document.getElementById('editEventDeleteBtn').dataset.id = id;
   renderEditEventShareSlot(ev);
+  renderEditEventAttachments();
   modal.classList.add('visible');
   if (window.setCalendarDayBehind) window.setCalendarDayBehind(true);
   setTimeout(() => document.getElementById('editEventTitle').focus(), 100);
@@ -405,6 +414,26 @@ function renderEditEventShareSlot(ev) {
 function closeEditEventModal() {
   document.getElementById('editEventModal').classList.remove('visible');
   if (window.setCalendarDayBehind) window.setCalendarDayBehind(false);
+}
+
+/** Render the paperclip + chips inside the open edit modal. */
+function renderEditEventAttachments() {
+  const slot = document.getElementById('editEventAttachments');
+  if (!slot) return;
+  const id = document.getElementById('editEventId')?.value;
+  const ev = (state.allEvents || []).find(x => x.id === id);
+  if (!ev) { slot.innerHTML = ''; return; }
+  // Drive-only, like the TODO paperclip: the upload needs the Drive
+  // adapter, absent in Demo/Local.
+  const canAttach = typeof state.driveAdapter?.uploadAttachment === 'function';
+  slot.innerHTML = `${canAttach ? `<button class="btn" data-action="attach-to-event" data-id="${esc(ev.id)}" title="${t('events.attach_file')}" aria-label="${t('events.attach_file')}">${lucideIcon('paperclip', 15)}<span>${t('events.attach_file')}</span></button>` : ''}${attachmentsHtml(ev, { pending: eventAttachments.pendingFor(ev.id), actions: { remove: 'remove-event-attachment', cancel: 'cancel-event-attachment', retry: 'retry-event-attachment' }, i18nPrefix: 'events' })}`;
+}
+
+/** The queue's render: the modal section, plus the calendar behind it so
+ * the day panel's read-only chips update without waiting for a save. */
+function renderEventAttachments() {
+  renderEditEventAttachments();
+  if (state.currentView === 'calendar' && typeof window.renderCalendar === 'function') window.renderCalendar();
 }
 
 // ===================================================================
@@ -444,9 +473,12 @@ async function saveEditEvent() {
   const fields = readEventForm('edit');
   if (!fields) return;
   if (ev.shared_id && ev.shared_group_id) {
-    // Shared: the payload is canonical — update it via the adapter.
+    // Shared: the payload is canonical — update it via the adapter, merging
+    // onto the LIVE payload (v2.32.194 pattern): building from eventPayload
+    // alone would write the row's possibly stale fields over a concurrent
+    // change, including attachments added by another member.
     try {
-      await state.sharing.updateItem(ev.shared_group_id, ev.shared_id, { payload: { ...eventPayload(ev), ...fields, all_day: !!fields.all_day } });
+      await state.sharing.updateItem(ev.shared_group_id, ev.shared_id, { payload: sharedEventPayload(ev, { ...fields, all_day: !!fields.all_day }) });
     } catch (e) { showToast(e.message, 'error'); return; }
     closeEditEventModal();
     showToast(t('events.event_updated'), 'success');
@@ -475,6 +507,7 @@ async function deleteEvent(id) {
       }
       const { error } = await state.db.from('events').delete().eq('id', id);
       if (error) { showToast(t('toast.delete_failed'), 'error'); return; }
+      await trashOwnItemAttachments(ev, state.allEvents || []);
       closeEditEventModal();
       showToast(t('events.event_removed'), 'info');
       await refreshEvents();
@@ -490,6 +523,47 @@ function pokeCalendarSync() {
   }
 }
 
+// ── Attachments ──
+// Mirrors saveTodoAttachments: shared events write through the sharing
+// payload ({ payload: {...} } partial update); personal events update the
+// events row. Throws on failure — the queue turns it into an error chip.
+// The live shared payload for a shared event — the single source for the
+// attachment save. Building the payload from eventPayload(ev) alone would
+// write the row's (possibly stale) fields over a concurrent change; read
+// it live and throw when it cannot be read: writing a stub payload would
+// wipe the shared fields it doesn't carry. (v2.32.194 pattern)
+function sharedEventPayload(ev, overrides = {}) {
+  const live = state.sharing.getItems(ev.shared_group_id, 'event')
+    .find(i => i.id === ev.shared_id);
+  if (!live?.payload) throw new Error('shared payload unavailable');
+  return { ...live.payload, ...overrides };
+}
+
+async function saveEventAttachments(ev, next) {
+  if (!ev) return;
+  const payload = normalizeAttachments(next);
+  if (ev.shared_id && ev.shared_group_id && state.sharing) {
+    await state.sharing.updateItem(ev.shared_group_id, ev.shared_id, { payload: sharedEventPayload(ev, { attachments: payload }) });
+    return;
+  }
+  const { error } = await state.db.from('events').update({ attachments: serializeAttachments(payload) }).eq('id', ev.id);
+  if (error) throw error;
+}
+
+const eventAttachments = createAttachmentQueue({
+  getItem: (id) => (state.allEvents || []).find(e => e.id === id),
+  getLocalItems: () => state.allEvents || [],
+  saveAttachments: saveEventAttachments,
+  render: renderEventAttachments,
+  actions: { remove: 'remove-event-attachment', cancel: 'cancel-event-attachment', retry: 'retry-event-attachment' },
+  i18nPrefix: 'events',
+});
+
+window.attachToEvent = (id, el) => eventAttachments.attach(id, el);
+window.removeEventAttachment = (id, fileId, el) => eventAttachments.remove(id, fileId, el);
+window.cancelEventAttachment = (id, fileId, el) => eventAttachments.cancel(id, fileId, el);
+window.retryEventAttachment = (id, fileId, el) => eventAttachments.retry(id, fileId, el);
+
 // ===================================================================
 // SHARING — share / unshare / copy (TODO pattern)
 // ===================================================================
@@ -504,6 +578,20 @@ function pokeCalendarSync() {
 async function convertEventToShared(ev, groupId) {
   const sharedId = crypto.randomUUID();
   const payload = eventPayload(ev);
+  // Grants first: the payload carries the attachment records, so the
+  // files must be readable by the group before the item is staged (a
+  // grant failure aborts the share; rollback on any later failure).
+  const evAttachmentsShare = normalizeAttachments(ev.attachments);
+  let granted = [];
+  if (evAttachmentsShare.length) {
+    const grant = await shareAttachmentsWithGroup(groupId, evAttachmentsShare);
+    if (!grant.ok) { showToast(t('events.share_attachments_failed'), 'error'); return false; }
+    granted = grant.granted;
+  }
+  const rollBackGrantsOnce = (() => {
+    let done = false;
+    return async () => { if (!done) { done = true; await rollbackAttachmentGrants(groupId, granted); } };
+  })();
   const personalRow = { ...ev };
   delete personalRow._shared;
   let onStaged;
@@ -514,6 +602,7 @@ async function convertEventToShared(ev, groupId) {
   await Promise.race([staged, upload.then(() => {}, () => {})]);
   if (!wasStaged) {
     const err = await upload.then(() => null, (e) => e);
+    await rollBackGrantsOnce();
     if (err) showToast(err.message, 'error');
     return false;
   }
@@ -522,12 +611,14 @@ async function convertEventToShared(ev, groupId) {
   });
   if (ptrErr) {
     state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+    await rollBackGrantsOnce();
     showToast(ptrErr.message, 'error');
     return false;
   }
   await state.db.from('events').delete().eq('id', ev.id);
   const uploaded = await upload.then(() => true, async (driveErr) => {
     // Upload failed after the swap: restore the personal row.
+    await rollBackGrantsOnce();
     await state.db.from('events').delete().eq('shared_id', sharedId);
     await state.db.from('events').insert(personalRow);
     showToast(driveErr.message, 'error');
@@ -578,6 +669,7 @@ async function unshareEvent(id, el) {
           title: fields.title, note: fields.note, all_day: fields.all_day ? 1 : 0,
           start_ts: fields.start_ts, end_ts: fields.end_ts,
           start_date: fields.start_date, end_date: fields.end_date, timezone: fields.timezone,
+          attachments: serializeAttachments(fields.attachments),
         }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
         const pointerRow = { ...ev };
@@ -587,7 +679,15 @@ async function unshareEvent(id, el) {
         const staged = new Promise(resolve => { onStaged = resolve; });
         const upload = state.sharing.deleteItem(ev.shared_group_id, ev.shared_id, { onStaged });
         upload.then(
-          () => showToast(t('sharing.unshared'), 'success'),
+          async () => {
+            // The group loses access to the unsharer's own files only — other
+            // members' files keep their grants (v2.32.135). The personal
+            // copy keeps the records, so the files stay readable for the owner.
+            for (const file of ownAttachmentFiles(ev.attachments, await myAttachmentUploaderId(ev))) {
+              try { await state.sharing.revokeFileWithGroup(ev.shared_group_id, file.drive_file_id); } catch {}
+            }
+            showToast(t('sharing.unshared'), 'success');
+          },
           async (e) => {
             console.warn('Failed to unshare event on Drive:', e);
             if (personalRow?.id) await state.db.from('events').delete().eq('id', personalRow.id);
@@ -623,6 +723,7 @@ async function copyEventToPersonal(id, el) {
       title: fields.title, note: fields.note, all_day: fields.all_day ? 1 : 0,
       start_ts: fields.start_ts, end_ts: fields.end_ts,
       start_date: fields.start_date, end_date: fields.end_date, timezone: fields.timezone,
+      attachments: serializeAttachments(fields.attachments),
     });
     if (insErr) { showToast(insErr.message, 'error'); return; }
     showToast(t('sharing.copied_to_personal'), 'success');

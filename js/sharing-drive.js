@@ -1793,9 +1793,9 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const myId = await currentMemberId(groupId).catch(() => null);
       if (!myId) return [];
       const granted = [];
-      // Lists and TODOs carry attachments in the payload; habits top-level
-      // (ownAttachmentFileIds reads both shapes). One pass per type.
-      for (const type of ['lists', 'todos', 'habits']) {
+      // Lists, TODOs and events carry attachments in the payload; habits
+      // top-level (ownAttachmentFileIds reads both shapes). One pass per type.
+      for (const type of ['lists', 'todos', 'habits', 'events']) {
         for (const fileId of ownAttachmentFileIds(e.typeData[type] || [], myId)) {
           try {
             granted.push(...await this.shareFileWithGroup(groupId, fileId, 'reader'));

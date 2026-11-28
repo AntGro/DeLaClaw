@@ -1647,7 +1647,7 @@ test('demo adapter: restoring a pre-2.0.9 backup runs the full migration chain',
     '2.32.190 must run after the older Drive-context migrations');
   assert(!('projects' in store) && !('vestiaire' in store),
     'the source tables must be deleted by their migrations');
-  assert(store.settings.find((s) => s.key === 'schema_version').value === '2.32.193',
+  assert(store.settings.find((s) => s.key === 'schema_version').value === '2.32.199',
     'schema_version must end at the latest migration');
 });
 
@@ -6250,7 +6250,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       }
     });
 
-    test('calendar search (2.32.42): title-only match, notes never matched, Welcome excluded', async () => {
+    test('calendar search (2.32.42, attachment names v2.32.199): title and attachment names match, notes never matched, Welcome excluded', async () => {
       // Same DOM stubs as the show-override test above (calendar.js
       // touches DOM at import).
       const saved = { document: globalThis.document, localStorage: globalThis.localStorage, window: globalThis.window, addEventListener: globalThis.addEventListener };
@@ -6269,7 +6269,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         const state = (await import(pathToFileURL(path.join(JS_DIR, 'state.js')).href)).default;
         const prevB = state.allBirthdays, prevE = state.allEvents;
         state.allBirthdays = [{ id: 'b1', name: 'Alice Test', birthday: '1990-10-28' }];
-        state.allEvents = [{ id: 'e1', title: 'Dentist appointment', note: 'bring insurance card', all_day: 1, start_date: '2026-10-28', end_date: '2026-10-28', start_ts: null, end_ts: null, timezone: null }];
+        state.allEvents = [{ id: 'e1', title: 'Dentist appointment', note: 'bring insurance card', all_day: 1, start_date: '2026-10-28', end_date: '2026-10-28', start_ts: null, end_ts: null, timezone: null, attachments: [{ drive_file_id: 'f1', name: 'reservation.pdf', size: 100, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'demo' }] }];
         try {
           const show = { todo: true, habit: true, birthday: true, event: true };
           const day = (map) => map.get('2026-10-28') || [];
@@ -6278,6 +6278,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
           assert(day(alice).some(e => e.type === 'birthday' && e.title === 'Alice Test'), 'search must match a birthday by name, case-insensitively');
           const dentist = cal.collectRangeEvents('2026-10-26', '2026-11-01', show, 'dentist');
           assert(day(dentist).some(e => e.type === 'event'), 'search must match an event by title');
+          // Attachment names are matched too (events carry theirs).
+          const reservation = cal.collectRangeEvents('2026-10-26', '2026-11-01', show, 'reservation');
+          assert(day(reservation).some(e => e.type === 'event'), 'search must match an event by attachment name');
           // Notes are never matched — the word lives only in the note.
           const insurance = cal.collectRangeEvents('2026-10-26', '2026-11-01', show, 'insurance');
           assert(!day(insurance).some(e => e.type === 'event'), 'search must not match an event note');
@@ -6301,8 +6304,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
           'year view must pass the search query');
         assert(calSrc.includes("collectRangeEvents(dateStr, dateStr, calShow, calSearch)"),
           'day view/panel must pass the search query');
-        assert(calSrc.includes("const kept = evs.filter(ev => (ev.title || '').toLowerCase().includes(search));"),
-          'the filter must consult the title only — notes and category names are never read');
+        assert(calSrc.includes("const kept = evs.filter(ev => (ev.title || '').toLowerCase().includes(search)"),
+          'the filter must consult the title — notes and category names are never read');
+        assert(calSrc.includes("(ev.attachments || []).some(a => (a.name || '').toLowerCase().includes(search))"),
+          'the filter must also match attachment names (v2.32.199)');
         assert(calSrc.includes("JSON.stringify({ view: calView, show: calShow })"),
           'calendar prefs must persist only view and filters, never the search query');
         const welcomeSrc = fs.readFileSync(path.join(JS_DIR, 'welcome.js'), 'utf-8');
@@ -10692,7 +10697,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('attachments: remove confirm is translated and Welcome chips sit before the meta', () => {
       const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
-      assert((i18nSrc.match(/remove_attachment_confirm:/g) || []).length === 9, 'the remove confirm must be defined in all 3 locales x 3 namespaces');
+      assert((i18nSrc.match(/remove_attachment_confirm:/g) || []).length === 12, 'the remove confirm must be defined in all 3 locales x 4 namespaces');
       const attSrc = jsFiles['attachments.js'];
       assert(attSrc.includes('t(`${i18nPrefix}.remove_attachment_confirm`, target.name)'), 'remove() must ask through the translated key');
       assert(!attSrc.includes('Remove "${'), 'no hardcoded English remove confirm may remain');
@@ -10959,18 +10964,22 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'the unshare personal copy must carry the original attachment records');
     });
 
-    test('sharing: keep-copies carries TODO and habit attachments', () => {
+    test('sharing: keep-copies carries TODO, habit and event attachments', () => {
       const uiSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
       const fnStart = uiSrc.indexOf('async function _convertGroupItemsToPersonal');
       const todoStart = uiSrc.indexOf('// ── Todos ──', fnStart);
       const habitStart = uiSrc.indexOf('// ── Habits ──', todoStart);
       const listStart = uiSrc.indexOf('// ── List items ──', habitStart);
+      const eventStart = uiSrc.indexOf('// ── Events ──', listStart);
       const todoSec = uiSrc.slice(todoStart, habitStart);
       const habitSec = uiSrc.slice(habitStart, listStart);
+      const eventSec = uiSrc.slice(eventStart);
       assert(todoSec.includes('serializeAttachments(sh.payload?.attachments)'),
         'keep-copies must carry a TODO’s attachment records from the payload');
       assert(habitSec.includes('serializeAttachments(sh.attachments)'),
         'keep-copies must carry a habit’s attachment records from the shared habit object');
+      assert(eventSec.includes('serializeAttachments(p.attachments)'),
+        'keep-copies must carry an event’s attachment records from the payload');
     });
 
     test('sharing: keep-copies conversion carries TODO and habit attachments into the personal rows', async () => {
@@ -10981,6 +10990,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const todoAtts = [{ drive_file_id: 'f-todo', name: 'list.pdf', size: 100, url: 'https://drive.google.com/file/d/f-todo/view', uploaded_by: 'member-aaa' }];
       const habitAtts = [{ drive_file_id: 'f-habit', name: 'plan.pdf', size: 200, url: 'https://drive.google.com/file/d/f-habit/view', uploaded_by: 'member-bbb' }];
       const listAtts = [{ drive_file_id: 'f-list', name: 'notes.pdf', size: 300, url: 'https://drive.google.com/file/d/f-list/view', uploaded_by: 'member-ccc' }];
+      const eventAtts = [{ drive_file_id: 'f-event', name: 'menu.pdf', size: 400, url: 'https://drive.google.com/file/d/f-event/view', uploaded_by: 'member-ddd' }];
       const rows = {
         todo_categories: [
           { id: 'tc-shared', name: '__shared__', is_protected: 1 },
@@ -11000,7 +11010,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         list_items: [
           { id: 'l1', text: '', note: '', shared_id: 'sh-l1', shared_group_id: 'g1' },
         ],
-        events: [],
+        events: [
+          { id: 'e1', title: '', shared_id: 'sh-e1', shared_group_id: 'g1' },
+        ],
       };
       const sharedTodos = [
         { id: 'sh-t1', group_id: 'g1', payload: { text: 'Buy milk', priority: 'high', due_date: '2026-12-01', attachments: todoAtts } },
@@ -11011,6 +11023,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       ];
       const sharedListItems = [
         { id: 'sh-l1', group_id: 'g1', payload: { text: 'Item', attachments: listAtts } },
+      ];
+      const sharedEvents = [
+        { id: 'sh-e1', group_id: 'g1', item_type: 'event', payload: { title: 'Dinner', note: 'Italian', all_day: 0, start_ts: '2026-11-28T18:00:00.000Z', end_ts: '2026-11-28T19:30:00.000Z', start_date: null, end_date: null, timezone: 'Europe/London', attachments: eventAtts } },
       ];
       const updates = [];
       const db = {
@@ -11028,7 +11043,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       };
       const fakeState = {
         sharing: {
-          getAllSharedItems: () => [...sharedTodos, ...sharedListItems],
+          getAllSharedItems: () => [...sharedTodos, ...sharedListItems, ...sharedEvents],
           getAllSharedHabits: () => sharedHabits,
         },
         db,
@@ -11056,6 +11071,9 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(habitPatch && habitPatch.attachments === JSON.stringify(habitAtts), 'the kept habit must carry the original attachment records');
       const listPatch = updates.find(u => u.table === 'list_items' && u.id === 'l1')?.patch;
       assert(listPatch && listPatch.attachments === JSON.stringify(listAtts), 'the kept list item must still carry the original attachment records');
+      const eventPatch = updates.find(u => u.table === 'events' && u.id === 'e1')?.patch;
+      assert(eventPatch && eventPatch.title === 'Dinner' && eventPatch.note === 'Italian', 'the kept event must keep its shared title and note');
+      assert(eventPatch && eventPatch.attachments === JSON.stringify(eventAtts), 'the kept event must carry the original attachment records');
     });
 
     test('lists: sharedListItemPayload carries attachments only when the item has any', () => {
@@ -11186,6 +11204,18 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'the Drive migration must normalize todos and habits attachments');
     });
 
+    test('migrations: events gain the attachments column in 2.32.199', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(/CREATE TABLE IF NOT EXISTS events \([^;]*attachments TEXT/.test(schema),
+        'schema.sql must add attachments TEXT to events');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.32.199'") && local.includes('ALTER TABLE events ADD COLUMN attachments TEXT'),
+        'the local migration must add the attachments column to events');
+      const driveMig = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(driveMig.includes("'2.32.199'") && driveMig.includes('store.events'),
+        'the Drive migration must normalize events attachments');
+    });
+
     test('lists: attachment UI is wired, Drive-gated, and shared items carry the payload', () => {
       const listsSrc = jsFiles['lists.js'];
       const attSrc = jsFiles['attachments.js'];
@@ -11292,11 +11322,11 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // The keys are picked by variable in places, so the t()-scan test
       // cannot see them all — pin their presence in all three locales directly.
       const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
-      // One definition per locale per namespace (lists, todos, habits):
-      // 3 locales x 3 namespaces = 9.
+      // One definition per locale per namespace (lists, todos, habits, events):
+      // 3 locales x 4 namespaces = 12.
       for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed', 'cancel_upload', 'retry_upload', 'attachment_no_uploader', 'share_attachments_failed']) {
         const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
-        assert(count === 9, `${key} must be defined in all three locales for lists, todos and habits, found ${count}`);
+        assert(count === 12, `${key} must be defined in all three locales for lists, todos, habits and events, found ${count}`);
       }
     });
 
@@ -11365,6 +11395,52 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(!todosSrc.includes('todo._shared?.payload'), 'attachment writes must not read the _shared snapshot');
     });
 
+    test('sharedEventPayload merges onto the live payload and throws when it is missing', () => {
+      const eventsSrc = jsFiles['events.js'];
+      const start = eventsSrc.indexOf('function sharedEventPayload(ev, overrides = {}) {');
+      assert(start >= 0, 'sharedEventPayload must be defined in events.js');
+      const end = eventsSrc.indexOf('\n}\n', start) + 3;
+      assert(end > start, 'sharedEventPayload must have a closing brace');
+      const livePayload = { title: 'Dinner', note: 'Italian', all_day: 0, start_ts: '2026-11-28T18:00:00.000Z', end_ts: '2026-11-28T19:30:00.000Z', start_date: null, end_date: null, timezone: 'Europe/London', attachments: [{ drive_file_id: 'f1', name: 'menu.pdf', size: 10, url: 'https://x', uploaded_by: 'm1' }] };
+      let getItemsArgs = null;
+      let items = [{ id: 'sh-1', payload: livePayload }];
+      const fakeState = { sharing: { getItems: (groupId, type) => { getItemsArgs = [groupId, type]; return items; } } };
+      const sharedEventPayload = new Function('state', `${eventsSrc.slice(start, end)}; return sharedEventPayload;`)(fakeState);
+      const ev = { shared_group_id: 'g-1', shared_id: 'sh-1' };
+      const merged = sharedEventPayload(ev, { title: 'Dinner moved' });
+      assert(JSON.stringify(merged) === JSON.stringify({ ...livePayload, title: 'Dinner moved' }), 'overrides must win while every other field (attachments, times, timezone) survives');
+      assert(merged !== livePayload, 'the merge must copy, never mutate the live payload');
+      assert(JSON.stringify(getItemsArgs) === JSON.stringify(['g-1', 'event']), 'the live read must query the sharing adapter for this group and type');
+      items = [];
+      let threw = null;
+      try { sharedEventPayload(ev, { title: 'x' }); } catch (e) { threw = e; }
+      assert(threw && threw.message === 'shared payload unavailable', 'a missing live item must throw, not write a stub');
+      items = [{ id: 'sh-1', payload: null }];
+      threw = null;
+      try { sharedEventPayload(ev, {}); } catch (e) { threw = e; }
+      assert(threw && threw.message === 'shared payload unavailable', 'a live item without a payload must throw, not write a stub');
+    });
+
+    test('eventPayload carries the attachment records and drops invalid ones', () => {
+      const eventsSrc = jsFiles['events.js'];
+      const start = eventsSrc.indexOf('function eventPayload(ev) {');
+      assert(start >= 0, 'eventPayload must be defined in events.js');
+      const end = eventsSrc.indexOf('\n}\n', start) + 3;
+      assert(end > start, 'eventPayload must have a closing brace');
+      const attSrc = fs.readFileSync(path.join(JS_DIR, 'attachments.js'), 'utf-8');
+      const normStart = attSrc.indexOf('function normalizeAttachments(value) {');
+      const normEnd = attSrc.indexOf('\n}\n', normStart) + 3;
+      const normalizeAttachments = new Function(`${attSrc.slice(normStart, normEnd)}; return normalizeAttachments;`)();
+      const eventPayload = new Function('normalizeAttachments', `${eventsSrc.slice(start, end)}; return eventPayload;`)(normalizeAttachments);
+      const valid = { drive_file_id: 'f1', name: 'menu.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc' };
+      const p = eventPayload({ title: 'Dinner', note: null, all_day: 0, start_ts: 'x', end_ts: 'y', start_date: null, end_date: null, timezone: 'Europe/London', attachments: [valid, { drive_file_id: 'f2', name: 'no-uploader.pdf', size: 1, url: 'https://x' }] });
+      assert(p.title === 'Dinner' && p.timezone === 'Europe/London', 'the payload must keep the event fields');
+      assert(Array.isArray(p.attachments) && p.attachments.length === 1 && p.attachments[0].drive_file_id === 'f1',
+        'the payload must carry the valid records and drop the one without an uploader');
+      const bare = eventPayload({ title: 'x', attachments: [] });
+      assert(Array.isArray(bare.attachments) && bare.attachments.length === 0, 'an event without attachments keeps an empty array in the payload');
+    });
+
     test('habits: attachment UI is wired, Drive-gated, and shared habits carry attachments top-level', () => {
       const habitsSrc = jsFiles['habits.js'];
       assert(habitsSrc.includes('data-action="attach-to-habit"'), 'habits must offer an attach button');
@@ -11388,6 +11464,42 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(delSrc.includes("case 'remove-habit-attachment':"), 'delegation must route the remove action');
       assert(delSrc.includes("case 'cancel-habit-attachment':"), 'delegation must route the cancel action');
       assert(delSrc.includes("case 'retry-habit-attachment':"), 'delegation must route the retry action');
+    });
+
+    test('events: attachment UI is wired in the edit modal, Drive-gated, and shared events carry the payload', () => {
+      const eventsSrc = jsFiles['events.js'];
+      assert(eventsSrc.includes('data-action="attach-to-event"'), 'events must offer an attach button in the edit modal');
+      assert(eventsSrc.includes("'remove-event-attachment'"), 'the event queue must wire the remove action');
+      assert(eventsSrc.includes("typeof state.driveAdapter?.uploadAttachment === 'function'"),
+        'the attach button must hide without a Drive adapter');
+      assert(eventsSrc.includes("attachmentsHtml(ev, { pending: eventAttachments.pendingFor(ev.id), actions: { remove: 'remove-event-attachment', cancel: 'cancel-event-attachment', retry: 'retry-event-attachment' }, i18nPrefix: 'events' })"),
+        'attachments must render as chips in the edit modal');
+      assert(eventsSrc.includes('ev.attachments = normalizeAttachments(sh.payload?.attachments)'),
+        'shared events must read attachments from the sharing payload');
+      assert(eventsSrc.includes('sharedEventPayload(ev, { attachments: payload })'),
+        'shared event attachment writes must go through the live payload');
+      assert(eventsSrc.includes('attachments: normalizeAttachments(ev.attachments)'),
+        'eventPayload must carry the records so share, unshare and copy carry them');
+      assert(eventsSrc.includes('payload: sharedEventPayload(ev, { ...fields, all_day: !!fields.all_day })'),
+        'saving an edit on a shared event must merge onto the live payload, never a from-scratch one');
+      assert(eventsSrc.includes('window.attachToEvent = (id, el) => eventAttachments.attach(id, el)'), 'the attach flow must be window-exposed for delegation');
+      assert(eventsSrc.includes('window.removeEventAttachment = (id, fileId, el) => eventAttachments.remove(id, fileId, el)'), 'the remove flow must be window-exposed for delegation');
+      assert(eventsSrc.includes('shareAttachmentsWithGroup(groupId, evAttachmentsShare)'), 'sharing an event must grant its files first');
+      assert(eventsSrc.includes('attachments: serializeAttachments(fields.attachments)'), 'unshare and copy-to-personal must carry the records');
+      assert(eventsSrc.includes('await trashOwnItemAttachments(ev, state.allEvents || [])'), 'deleting an event must trash only the deleter’s own files');
+      assert(eventsSrc.includes('revokeFileWithGroup(ev.shared_group_id, file.drive_file_id)'), 'unsharing an event must revoke the group’s access to the unsharer’s own files');
+      const delSrc = jsFiles['delegation.js'];
+      assert(delSrc.includes("case 'attach-to-event':"), 'delegation must route the attach action');
+      assert(delSrc.includes("case 'remove-event-attachment':"), 'delegation must route the remove action');
+      assert(delSrc.includes("case 'cancel-event-attachment':"), 'delegation must route the cancel action');
+      assert(delSrc.includes("case 'retry-event-attachment':"), 'delegation must route the retry action');
+      // Calendar slice: read-only chips under the day-panel row, and the
+      // search matches attachment names as well as titles.
+      const calSrc = jsFiles['calendar.js'];
+      assert(calSrc.includes("attachmentsHtml({ id: ev.id, attachments: ev.attachments, shared_group_id: ev.shared_group_id }, { removable: false, i18nPrefix: 'events' })"),
+        'the day panel must show read-only chips under event rows');
+      assert(calSrc.includes("(ev.attachments || []).some(a => (a.name || '').toLowerCase().includes(search))"),
+        'calendar search must match attachment names');
     });
 
     test('welcome: focus rows show read-only attachment chips for TODOs and habits', () => {
@@ -11453,7 +11565,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(iface.includes('sweepAttachmentGrants:'), 'the sharing interface must declare sweepAttachmentGrants');
       const driveSrc = jsFiles['sharing-drive.js'];
       assert(driveSrc.includes('async sweepAttachmentGrants(groupId)'), 'the Drive adapter must implement sweepAttachmentGrants');
-      assert(driveSrc.includes("for (const type of ['lists', 'todos', 'habits'])"), 'the sweep must scan lists, todos and habits');
+      assert(driveSrc.includes("for (const type of ['lists', 'todos', 'habits', 'events'])"), 'the sweep must scan lists, todos, habits and events');
       assert(driveSrc.includes('ownAttachmentFileIds(e.typeData[type] || [], myId)'), 'the sweep must scan each type for my files');
       assert(driveSrc.includes("this.shareFileWithGroup(groupId, fileId, 'reader')"), 'the sweep must grant each file reader');
       // Load-time trigger: post-load repairs in loadAll.

@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "2.32.201",
-    "generated_at": "2026-11-28T10:15:57.243Z",
+    "version": "2.32.202",
+    "generated_at": "2026-11-28T10:38:53.292Z",
     "loc_total": 41106,
     "files_scanned": 50,
     "tier": "T2-enriched",
@@ -94,7 +94,7 @@
       "guards": [
         "pendingSet"
       ],
-      "esc_count": 138,
+      "esc_count": 135,
       "i18n_count": 191,
       "window_exposed": [
         "navigateToFlashDeck",

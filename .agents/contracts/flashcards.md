@@ -37,7 +37,7 @@ User jobs:
 
 ## Security
 - **XSS:** see CODEMAP for current esc_count — wrap `front`, `back`, `note`, `content`, `text title` in `esc()` except `renderMd()` which escapes internally
-- No innerHTML with user data; draft content uses textContent
+- No innerHTML with user data; draft content and the proposed Q/A render through `renderMd()` (v2.32.202), which escapes first, so `[text](url)` links work there like in TODO text and list items
 
 ## i18n
 - **Prefix:** `flashcards.` — see CODEMAP for current key count (EN/FR/ES)

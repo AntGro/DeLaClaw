@@ -1,7 +1,7 @@
 import { lucideIcon } from './icons.js';
 import { t, getLang } from './i18n.js';
 import state, { GENERAL_CATEGORY_COLOR, SHARED_CATEGORY as SHARED_CAT_CONST } from './state.js';
-import { esc, escQ, showToast, showConfirmAction, applySectionGrid, fetchAll, isMobileUA, isTouchDevice, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, onColorFor } from './utils.js';
+import { esc, escQ, renderMd, showToast, showConfirmAction, applySectionGrid, fetchAll, isMobileUA, isTouchDevice, backfillCategoryColors, nextPaletteColor, autoResizeTextarea, onColorFor } from './utils.js';
 import { scrollToAndHighlight, inlineEditText, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { generateStorm, LOGO_DEFAULTS } from './logo.js';
 import { parseSceneContent, splitSceneIntoChunks, sceneLineText, sceneBlockText, sceneSpeakersEqual, groupLinesBySpeaker, buildRoleColorMap, persistTextEdit, leadingRevealCount, trailingRevealCount, getTextChunks, chunkPreviewText, isChunkDue, chunkReviseMode, applyChunkEdit } from './scene-parse.js';
@@ -916,8 +916,8 @@ function renderDraftItem(d) {
     const deckOptions = proposalDeckOptions(suggestedDeck);
     proposalHtml = `<div class="fc-proposal">
       <div class="fc-proposal-label">${lucideIcon('sparkles', 14, '#22c55e')} Proposed card:</div>
-      <div class="fc-proposal-qa"><strong>Q:</strong> ${esc(d.proposed_front)}</div>
-      <div class="fc-proposal-qa"><strong>A:</strong> ${esc(d.proposed_back)}</div>
+      <div class="fc-proposal-qa"><strong>Q:</strong> ${renderMd(d.proposed_front)}</div>
+      <div class="fc-proposal-qa"><strong>A:</strong> ${renderMd(d.proposed_back)}</div>
       <div class="fc-proposal-deck"><strong>${t('flashcards.deck')}:</strong> <select data-action="update-proposed-deck" data-id="${esc(d.id)}">${deckOptions}</select></div>
       <div class="fc-proposal-actions">
         <button class="fc-proposal-accept" data-action="accept-proposal" data-id="${esc(d.id)}" title="${t('flashcards.accept')}">${lucideIcon('check', 14, '#fff')} <span class="btn-label">${t('flashcards.accept')}</span></button>
@@ -935,7 +935,7 @@ function renderDraftItem(d) {
 
   return `<div class="bucket-item todo-item${draftCls}" data-draft-id="${d.id}">
     <div class="todo-row">
-      <span class="todo-text" style="cursor:text;">${esc(d.content.length > 120 ? d.content.slice(0, 120) + '…' : d.content)}</span>
+      <span class="todo-text" style="cursor:text;">${renderMd(d.content.length > 120 ? d.content.slice(0, 120) + '…' : d.content)}</span>
       ${isPending ? `<span class="fc-status-badge fc-status-pending">${t('flashcards.generating')}</span>` : ''}
       <div class="todo-actions">
         <button data-action="copy-item-link" data-link-type="flashdraft" data-id="${esc(d.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon('link', 16)}</button>

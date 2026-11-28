@@ -5645,6 +5645,25 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'masked bullets must follow the block line structure');
     });
 
+    test('drafts: [text](url) renders as a link in Draft items (v2.32.202)', () => {
+      const flashJs = jsFiles['flashcards.js'];
+      assert(flashJs.includes('renderMd, showToast'),
+        'flashcards.js must import renderMd from utils.js');
+      // renderDraftItem: the draft content and the proposed Q/A go
+      // through renderMd (which escapes internally) instead of plain
+      // esc, so a [text](url) in any of them renders as a link — like
+      // TODO text and list items. The 120-char truncation still happens
+      // before rendering, so a link cut mid-pattern stays literal text.
+      assert(flashJs.includes("${renderMd(d.content.length > 120 ? d.content.slice(0, 120) + '…' : d.content)}"),
+        'draft content must render through renderMd');
+      assert(flashJs.includes('${renderMd(d.proposed_front)}') && flashJs.includes('${renderMd(d.proposed_back)}'),
+        'the proposed Q/A must render through renderMd');
+      assert(!flashJs.includes('${esc(d.proposed_front)}') && !flashJs.includes('${esc(d.proposed_back)}'),
+        'the proposed Q/A must no longer be plain-escaped');
+      assert(!flashJs.includes('esc(d.content.length > 120'),
+        'draft content must no longer be plain-escaped');
+    });
+
     test('scene parser: NFD speaker cues parse (NFC-normalized)', async () => {
       const { parseSceneContent } =
         await import(pathToFileURL(path.join(JS_DIR, 'scene-parse.js')).href);

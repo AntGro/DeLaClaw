@@ -6,6 +6,7 @@ import { initItemHoverDelay, initItemDragDrop, scrollToAndHighlight, inlineEditT
 import { t, getLang } from './i18n.js';
 import { pendingSharedNextDue as _pendingSharedNextDue } from './pending-next-due.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
+import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
 
 // ===================================================================
 // HABITS — DATA, CRUD & RENDERING
@@ -633,6 +634,7 @@ async function refreshHabits() {
   // Normalize any legacy frequency_rule formats
   for (const h of state.allHabits) {
     if (h.frequency_rule) h.frequency_rule = normalizeFrequencyRule(h.frequency_rule);
+    h.attachments = normalizeAttachments(h.attachments);
   }
 
   try {
@@ -663,6 +665,7 @@ async function refreshHabits() {
         habit.is_finished = sh.is_finished ? 1 : 0;
         habit.snoozed_until = sh.snoozed_until || null;
         habit.is_auto = sh.is_auto ? 1 : 0;
+        habit.attachments = normalizeAttachments(sh.attachments);
         habit._shared = sh; // keep reference for completions/metadata
         // Inject shared completions into allHabitCompletions
         if (sh.completions?.length) {
@@ -1028,7 +1031,8 @@ function getFilteredHabitsForCategory(catId) {
     const q = habitSearchQuery.toLowerCase();
     filtered = filtered.filter(c =>
       (c.name && c.name.toLowerCase().includes(q)) ||
-      (getHabitCatDisplayName(catIdForHabit(c)).toLowerCase().includes(q))
+      (getHabitCatDisplayName(catIdForHabit(c)).toLowerCase().includes(q)) ||
+      normalizeAttachments(c.attachments).some(a => (a.name || '').toLowerCase().includes(q))
     );
   }
 
@@ -1382,6 +1386,8 @@ function renderHabitCategoryCard(catId) {
 }
 
 function renderHabitItem(habit) {
+  const canAttach = typeof state.driveAdapter?.uploadAttachment === 'function';
+  const attachmentsChipsHtml = attachmentsHtml(habit, { pending: habitAttachments.pendingFor(habit.id), actions: { remove: 'remove-habit-attachment', cancel: 'cancel-habit-attachment', retry: 'retry-habit-attachment' }, i18nPrefix: 'habits' });
   const lastDone = getHabitLastDone(habit.id);
   const completionCount = getHabitCompletionCount(habit.id);
   const isDraft = habit.is_draft;
@@ -1424,11 +1430,13 @@ function renderHabitItem(habit) {
         ${!isShared && !isDraft && state.sharing ? `<button data-action="share-existing-habit" data-id="${esc(habit.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !isDraft && _myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="unshare-habit" data-id="${esc(habit.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !isDraft && !_myCreatedSharedHabitIds.has(habit.shared_id) ? `<button data-action="copy-habit-to-personal" data-id="${esc(habit.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
+        ${canAttach ? `<button data-action="attach-to-habit" data-id="${esc(habit.id)}" title="${t('habits.attach_file')}" aria-label="${t('habits.attach_file')}">${lucideIcon("paperclip",16)}</button>` : ''}
         <button data-action="copy-item-link" data-link-type="habit" data-id="${esc(habit.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link",16)}</button>
         <button data-action="open-edit-habit-modal" data-id="${esc(habit.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-habit" data-id="${esc(habit.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
     </div>
+    ${attachmentsChipsHtml}
     <div class="habit-meta">
       ${dueHtml}
       ${isAuto && !isFinished ? `<span class="habit-auto-badge">${lucideIcon("zap",12)} ${t('habits.auto_badge')}</span>` : ''}
@@ -2064,6 +2072,12 @@ async function deleteHabit(habitId) {
       const el = document.querySelector(`[data-habit-id="${CSS.escape(habitId)}"]`);
       await animateItemRemoval(el);
 
+      // Best-effort: trash MY Drive attachments so they don't linger
+      // orphaned in the attachments folder. Never another member's files,
+      // and never a file another item still references (v2.32.138).
+      // Completions are untouched — attachments live on the habit row.
+      if (habit) await trashOwnItemAttachments(habit, state.allHabits);
+
       showToast(t('habits.habit_deleted'), 'info');
       await refreshHabits();
     },
@@ -2608,6 +2622,12 @@ async function deleteHabitCategory(catId) {
     for (const habit of habitsInCat) {
       await state.db.from('habits').delete().eq('id', habit.id);
     }
+    {
+      const excludeKeys = new Set(habitsInCat.map((h) => `habits:${h.id}`));
+      for (const habit of habitsInCat) {
+        try { await trashOwnItemAttachments(habit, state.allHabits, excludeKeys); } catch {}
+      }
+    }
     const { error } = await state.db.from('habit_categories').delete().eq('id', catId);
     if (error) { showToast(t('toast.delete_failed') + ': ' + error.message, 'error'); return; }
     showToast(t('habits.category_deleted', cat.name), 'info');
@@ -2725,6 +2745,12 @@ async function deleteHabitSectionSubtree() {
   }
   // Explicit per-item deletion so calendar dirty tracking fires.
   for (const item of itemRows) await state.db.from('habits').delete().eq('id', item.id);
+  {
+    const excludeKeys = new Set(itemRows.map((h) => `habits:${h.id}`));
+    for (const item of itemRows) {
+      try { await trashOwnItemAttachments(item, state.allHabits, excludeKeys); } catch {}
+    }
+  }
   for (const bid of bucketIds) await state.db.from('habit_categories').delete().eq('id', bid);
   for (const sid of sectionIds) await state.db.from('habit_categories').delete().eq('id', sid);
   showToast(t('toast.deleted'), 'info');
@@ -2744,6 +2770,38 @@ async function deleteHabitSectionSubtree() {
     }
   }
 }
+
+// ── Attachments ──
+// Mirrors saveListItemAttachments: shared habits publish the attachments
+// array top-level on the shared item (updateSharedHabit takes a changes
+// object and throws on failure); personal habits update the habits row.
+// Throws on failure — the queue turns it into an error chip. Attachments
+// live on the habit itself, never on its completions.
+async function saveHabitAttachments(habit, next) {
+  if (!habit) return;
+  const payload = normalizeAttachments(next);
+  if (habit.shared_id && habit.shared_group_id && state.sharing) {
+    await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { attachments: payload });
+    return;
+  }
+  const { error } = await state.db.from('habits').update({ attachments: serializeAttachments(payload) }).eq('id', habit.id);
+  if (error) throw error;
+}
+
+const habitAttachments = createAttachmentQueue({
+  getItem: (id) => (state.allHabits || []).find(h => h.id === id),
+  getLocalItems: () => state.allHabits || [],
+  itemAlive: (item) => (state.allHabits || []).some(h => h.id === item.id),
+  saveAttachments: saveHabitAttachments,
+  render: renderHabits,
+  actions: { remove: 'remove-habit-attachment', cancel: 'cancel-habit-attachment', retry: 'retry-habit-attachment' },
+  i18nPrefix: 'habits',
+});
+
+window.attachToHabit = (id, el) => habitAttachments.attach(id, el);
+window.removeHabitAttachment = (id, fileId, el) => habitAttachments.remove(id, fileId, el);
+window.cancelHabitAttachment = (id, fileId, el) => habitAttachments.cancel(id, fileId, el);
+window.retryHabitAttachment = (id, fileId, el) => habitAttachments.retry(id, fileId, el);
 
 // ── Shared Habits ───────────────────────────────────────────────
 
@@ -2978,6 +3036,22 @@ async function shareExistingHabit(id, el) {
       if (habit.is_auto) sharedItem.is_auto = 1;
       if (sharedFinished) sharedItem.is_finished = 1;
       if (nextDue != null) sharedItem.next_due = nextDue;
+      // Grants first: the shared item carries the attachment records
+      // top-level, so the files must be readable by the group before the
+      // item is staged (a grant failure aborts the share; rollback on any
+      // later failure).
+      const habitAttachmentsShare = normalizeAttachments(habit.attachments);
+      if (habitAttachmentsShare.length) sharedItem.attachments = habitAttachmentsShare;
+      let granted = [];
+      if (habitAttachmentsShare.length) {
+        const grant = await shareAttachmentsWithGroup(groupId, habitAttachmentsShare);
+        if (!grant.ok) { showToast(t('habits.share_attachments_failed'), 'error'); return; }
+        granted = grant.granted;
+      }
+      const rollBackGrantsOnce = (() => {
+        let done = false;
+        return async () => { if (!done) { done = true; await rollbackAttachmentGrants(groupId, granted); } };
+      })();
       // 1. Stage the shared item in memory first: this marks the created
       // intent and the dirty type, so the poll skips it and the
       // orphan-pointer cleanup can't see a pointer whose item isn't staged.
@@ -2999,6 +3073,7 @@ async function shareExistingHabit(id, el) {
         () => showToast(t('sharing.shared') + '!', 'success'),
         async (e) => {
           console.error('[DeLaClaw] share existing habit failed:', e);
+          await rollBackGrantsOnce();
           if (localStaged) {
             if (pointerId) await state.db.from('habits').delete().eq('id', pointerId);
             await state.db.from('habits').insert(personalHabit);
@@ -3009,7 +3084,7 @@ async function shareExistingHabit(id, el) {
         }
       );
       await Promise.race([staged, upload.then(() => {}, () => {})]);
-      if (!wasStaged) return;
+      if (!wasStaged) { await rollBackGrantsOnce(); return; }
       // 3. Stage locally: pointer in, personal habit + completions out.
       const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
         name: '', frequency_rule: '', category: catRow?.name ?? habit.category ?? '',
@@ -3022,6 +3097,7 @@ async function shareExistingHabit(id, el) {
       if (ptrErr) {
         // Back out the staged shared item — it hasn't uploaded yet.
         state.sharing.deleteSharedHabit(groupId, sharedId).catch(() => {});
+        await rollBackGrantsOnce();
         showToast(ptrErr.message, 'error');
         return;
       }
@@ -3090,6 +3166,14 @@ async function bulkShareHabitCategory(catId, el) {
             if (habit.is_auto) sharedItem.is_auto = 1;
             if (sharedFinished) sharedItem.is_finished = 1;
             if (nextDue != null) sharedItem.next_due = nextDue;
+            const habitAttachmentsBulk = normalizeAttachments(habit.attachments);
+            if (habitAttachmentsBulk.length) sharedItem.attachments = habitAttachmentsBulk;
+            let granted = [];
+            if (habitAttachmentsBulk.length) {
+              const grant = await shareAttachmentsWithGroup(groupId, habitAttachmentsBulk);
+              if (!grant.ok) continue; // same skip as a failed staging below
+              granted = grant.granted;
+            }
             // Snapshots for rollback — taken before the local deletes below.
             const personalHabit = { ...habit };
             const personalCompletions = (state.allHabitCompletions || [])
@@ -3101,6 +3185,7 @@ async function bulkShareHabitCategory(catId, el) {
             await Promise.race([stagedP, upload.then(() => {}, () => {})]);
             if (!wasStaged) {
               console.error('[DeLaClaw] bulk share habit staging failed:', sharedId);
+              await rollbackAttachmentGrants(groupId, granted);
               continue;
             }
             const { data: pointer, error: ptrErr } = await state.db.from('habits').insert({
@@ -3115,6 +3200,7 @@ async function bulkShareHabitCategory(catId, el) {
             if (ptrErr) {
               // Back out the staged shared item — it hasn't uploaded yet.
               state.sharing.deleteSharedHabit(groupId, sharedId).catch(() => {});
+              await rollbackAttachmentGrants(groupId, granted);
               continue;
             }
             await state.db.from('habit_completions').delete().eq('habit_id', habit.id);
@@ -3125,6 +3211,7 @@ async function bulkShareHabitCategory(catId, el) {
               personalHabit,
               personalCompletions,
               pointerId: pointer?.id,
+              granted,
             });
           }
           // Unblock the UI on staging.
@@ -3141,6 +3228,7 @@ async function bulkShareHabitCategory(catId, el) {
               if (s.pointerId) await state.db.from('habits').delete().eq('id', s.pointerId);
               await state.db.from('habits').insert(s.personalHabit);
               for (const c of s.personalCompletions) await state.db.from('habit_completions').insert(c);
+              await rollbackAttachmentGrants(groupId, s.granted || []);
             }
           }
           await refreshHabits();
@@ -3189,6 +3277,7 @@ async function unshareHabit(id, el) {
           snoozed_until: habit.snoozed_until || null,
           is_auto: habit.is_auto ? 1 : 0,
           is_finished: habit.is_finished ? 1 : 0,
+          attachments: serializeAttachments(habit.attachments),
         }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
         // 2. Recreate completions locally
@@ -3211,7 +3300,15 @@ async function unshareHabit(id, el) {
         const staged = new Promise(resolve => { onStaged = resolve; });
         const upload = state.sharing.deleteSharedHabit(habit.shared_group_id, habit.shared_id, { onStaged });
         upload.then(
-          () => showToast(t('sharing.unshared'), 'success'),
+          async () => {
+            // The group loses access to the unsharer's own files only — other
+            // members' files keep their grants (v2.32.135). The personal
+            // copy keeps the records, so the files stay readable for the owner.
+            for (const file of ownAttachmentFiles(habit.attachments, await myAttachmentUploaderId(habit))) {
+              try { await state.sharing.revokeFileWithGroup(habit.shared_group_id, file.drive_file_id); } catch {}
+            }
+            showToast(t('sharing.unshared'), 'success');
+          },
           async (e) => {
             console.warn('Failed to delete shared habit from Drive:', e);
             await state.db.from('habit_completions').delete().eq('habit_id', newHabit.id);
@@ -3259,6 +3356,7 @@ async function copyHabitToPersonal(id, el) {
       snoozed_until: habit.snoozed_until || null,
       is_auto: habit.is_auto ? 1 : 0,
       is_finished: habit.is_finished ? 1 : 0,
+      attachments: serializeAttachments(habit.attachments),
     }).select().single();
     if (insErr) { showToast(insErr.message, 'error'); return; }
     // Copy completions

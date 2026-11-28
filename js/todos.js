@@ -6,6 +6,7 @@ import { isSectionRow, normalizeSectionFields, parseSectionPath, buildSectionTre
 import { cleanupDragArtifacts, initItemHoverDelay, initItemDragDrop, reorderItems, bulkSortOrder, scrollToAndHighlight, inlineEditText, initNavBtnReorder, snapshotBuckets, animateBucketsFromSnapshot, captureInnerScrollPositions, restoreInnerScrollPositions, animateItemRemoval } from './item-utils.js';
 import { t, getLang } from './i18n.js';
 import { sharedBadge, openSharePopover } from './sharing-ui.js';
+import { normalizeAttachments, serializeAttachments, ownAttachmentFiles, myAttachmentUploaderId, trashOwnItemAttachments, shareAttachmentsWithGroup, rollbackAttachmentGrants, attachmentsHtml, createAttachmentQueue } from './attachments.js';
 
 // ===================================================================
 // TODOS — DATA & CRUD (Category Card Layout)
@@ -266,6 +267,7 @@ async function refreshTodos() {
     return;
   }
   allTodos = data || [];
+  for (const td of allTodos) td.attachments = normalizeAttachments(td.attachments);
 
   // Enrich shared todo pointers with live data from Drive
   if (state.sharing) {
@@ -283,6 +285,7 @@ async function refreshTodos() {
         todo.done = sh.done ? 1 : 0;
         todo.due_date = sh.payload?.due_date || null;
         todo.snooze_until = sh.payload?.snooze_until || null;
+        todo.attachments = normalizeAttachments(sh.payload?.attachments);
         todo._shared = sh;
         if (todo.shared_group_id) groupIds.add(todo.shared_group_id);
       }
@@ -338,7 +341,8 @@ function getFilteredTodosForCategory(catId) {
     const q = todoSearchQuery.toLowerCase();
     filtered = filtered.filter(t =>
       (t.text && t.text.toLowerCase().includes(q)) ||
-      (getCatDisplayName(catIdForTodo(t)).toLowerCase().includes(q))
+      (getCatDisplayName(catIdForTodo(t)).toLowerCase().includes(q)) ||
+      normalizeAttachments(t.attachments).some(a => (a.name || '').toLowerCase().includes(q))
     );
   }
 
@@ -651,6 +655,8 @@ function renderCategoryCard(catId) {
 }
 
 function renderTodoItem(td) {
+  const canAttach = typeof state.driveAdapter?.uploadAttachment === 'function';
+  const attachmentsChipsHtml = attachmentsHtml(td, { pending: todoAttachments.pendingFor(td.id), actions: { remove: 'remove-todo-attachment', cancel: 'cancel-todo-attachment', retry: 'retry-todo-attachment' }, i18nPrefix: 'todos' });
   const now = new Date();
   const isOverdue = td.due_date && !td.done && isDueOverdue(td.due_date, now);
   const isSnoozed = td.snooze_until && new Date(td.snooze_until) > now;
@@ -710,11 +716,13 @@ function renderTodoItem(td) {
         ${!isShared && !td.done && state.sharing ? `<button data-action="share-existing-todo" data-id="${esc(td.id)}" title="${t('sharing.share')}">${lucideIcon("share",16)}</button>` : ''}
         ${isShared && !td.done && _myCreatedSharedIds.has(td.shared_id) ? `<button data-action="unshare-todo" data-id="${esc(td.id)}" title="${t('sharing.unshare')}">${lucideIcon("share-off",16)}</button>` : ''}
         ${isShared && !td.done && !_myCreatedSharedIds.has(td.shared_id) ? `<button data-action="copy-todo-to-personal" data-id="${esc(td.id)}" title="${t('sharing.copy_to_personal')}">${lucideIcon("copy",16)}</button>` : ''}
+        ${canAttach ? `<button data-action="attach-to-todo" data-id="${esc(td.id)}" title="${t('todos.attach_file')}" aria-label="${t('todos.attach_file')}">${lucideIcon("paperclip",16)}</button>` : ''}
         <button data-action="copy-item-link" data-link-type="todo" data-id="${esc(td.id)}" title="${t('common.copy_link')}" aria-label="${t('common.copy_link')}">${lucideIcon("link",16)}</button>
         <button data-action="edit-todo-inline" data-id="${esc(td.id)}" title="${t('common.edit')}">${lucideIcon("pencil",16)}</button>
         <button data-action="delete-todo" data-id="${esc(td.id)}" title="${t('common.delete')}">${lucideIcon("trash-2",16)}</button>
       </div>
     </div>
+    ${attachmentsChipsHtml}
     ${dueDateStr || snoozeInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}</div>` : ''}
   </div>`;
 }
@@ -1122,6 +1130,11 @@ async function deleteTodo(id) {
       const el = document.querySelector(`[data-todo-id="${CSS.escape(id)}"]`);
       await animateItemRemoval(el);
 
+      // Best-effort: trash MY Drive attachments so they don't linger
+      // orphaned in the attachments folder. Never another member's files,
+      // and never a file another item still references (v2.32.138).
+      if (todo) await trashOwnItemAttachments(todo, allTodos);
+
       showToast(t('toast.deleted'), 'info');
       await refreshTodos();
     }
@@ -1147,6 +1160,14 @@ async function deleteAllDoneTodos(catId) {
       for (const td of doneTodos) {
         if (td.shared_id && td.shared_group_id) pointerRows.push({ ...td });
         await state.db.from('todos').delete().eq('id', td.id);
+      }
+      // Batch: the whole batch is excluded from the reference check, so a
+      // file referenced only by the deleted rows is still trashed.
+      {
+        const excludeKeys = new Set(doneTodos.map((t) => `todos:${t.id}`));
+        for (const td of doneTodos) {
+          try { await trashOwnItemAttachments(td, allTodos, excludeKeys); } catch {}
+        }
       }
       // Shared deletes upload in the background; failures restore the pointer rows.
       if (state.sharing && pointerRows.length) {
@@ -1503,6 +1524,12 @@ async function deleteCategory(catId) {
     for (const todo of todosInCat) {
       await state.db.from('todos').delete().eq('id', todo.id);
     }
+    {
+      const excludeKeys = new Set(todosInCat.map((t) => `todos:${t.id}`));
+      for (const todo of todosInCat) {
+        try { await trashOwnItemAttachments(todo, allTodos, excludeKeys); } catch {}
+      }
+    }
     await state.db.from('todo_categories').delete().eq('id', catId);
     showToast(t('toast.deleted'), 'info');
     await refreshTodos();
@@ -1620,6 +1647,12 @@ async function deleteSectionSubtree() {
   }
   // Explicit per-item deletion so calendar dirty tracking fires.
   for (const item of itemRows) await state.db.from('todos').delete().eq('id', item.id);
+  {
+    const excludeKeys = new Set(itemRows.map((t) => `todos:${t.id}`));
+    for (const item of itemRows) {
+      try { await trashOwnItemAttachments(item, allTodos, excludeKeys); } catch {}
+    }
+  }
   for (const bid of bucketIds) await state.db.from('todo_categories').delete().eq('id', bid);
   for (const sid of sectionIds) await state.db.from('todo_categories').delete().eq('id', sid);
   showToast(t('toast.deleted'), 'info');
@@ -2150,6 +2183,38 @@ async function shareTodoFromAdd(btn) {
 
 window.shareTodoFromAdd = shareTodoFromAdd;
 
+// ── Attachments ──
+// Mirrors saveListItemAttachments: shared items write through the sharing
+// payload ({ payload: {...} } partial update); personal items update the
+// todos row. Throws on failure — the queue turns it into an error chip.
+async function saveTodoAttachments(todo, next) {
+  if (!todo) return;
+  const payload = normalizeAttachments(next);
+  if (todo.shared_id && todo.shared_group_id && state.sharing) {
+    const currentPayload = todo._shared?.payload || {};
+    const { error } = await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, { payload: { ...currentPayload, attachments: payload } });
+    if (error) throw error;
+    return;
+  }
+  const { error } = await state.db.from('todos').update({ attachments: serializeAttachments(payload) }).eq('id', todo.id);
+  if (error) throw error;
+}
+
+const todoAttachments = createAttachmentQueue({
+  getItem: (id) => allTodos.find(t => t.id === id),
+  getLocalItems: () => allTodos,
+  itemAlive: (item) => allTodos.some(t => t.id === item.id),
+  saveAttachments: saveTodoAttachments,
+  render: renderTodos,
+  actions: { remove: 'remove-todo-attachment', cancel: 'cancel-todo-attachment', retry: 'retry-todo-attachment' },
+  i18nPrefix: 'todos',
+});
+
+window.attachToTodo = (id, el) => todoAttachments.attach(id, el);
+window.removeTodoAttachment = (id, fileId, el) => todoAttachments.remove(id, fileId, el);
+window.cancelTodoAttachment = (id, fileId, el) => todoAttachments.cancel(id, fileId, el);
+window.retryTodoAttachment = (id, fileId, el) => todoAttachments.retry(id, fileId, el);
+
 async function shareExistingTodo(id, el) {
   if (!state.sharing) return;
   if (_pendingShare.has(id)) return;
@@ -2164,7 +2229,21 @@ async function shareExistingTodo(id, el) {
     (async () => {
       const sharedId = crypto.randomUUID();
       const cat = _todoCatMap.get(catIdForTodo(todo));
-      const payload = { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null };
+      // Grants first: the payload carries the attachment records, so the
+      // files must be readable by the group before the item is staged (a
+      // grant failure aborts the share; rollback on any later failure).
+      const todoAttachmentsShare = normalizeAttachments(todo.attachments);
+      const payload = { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null, ...(todoAttachmentsShare.length ? { attachments: todoAttachmentsShare } : {}) };
+      let granted = [];
+      if (todoAttachmentsShare.length) {
+        const grant = await shareAttachmentsWithGroup(groupId, todoAttachmentsShare);
+        if (!grant.ok) { showToast(t('todos.share_attachments_failed'), 'error'); return; }
+        granted = grant.granted;
+      }
+      const rollBackGrantsOnce = (() => {
+        let done = false;
+        return async () => { if (!done) { done = true; await rollbackAttachmentGrants(groupId, granted); } };
+      })();
       // Keep the personal row: a failed upload restores it verbatim.
       const personalRow = { ...todo };
       // 1. Stage the shared item in memory first: this marks the created
@@ -2186,6 +2265,7 @@ async function shareExistingTodo(id, el) {
       upload.then(
         () => showToast(t('sharing.shared') + '!', 'success'),
         async (driveErr) => {
+          await rollBackGrantsOnce();
           if (locallyStaged) {
             await state.db.from('todos').delete().eq('shared_id', sharedId);
             await state.db.from('todos').insert(personalRow);
@@ -2197,7 +2277,7 @@ async function shareExistingTodo(id, el) {
       // Unblock the UI on staging — don't wait for the upload. If the upload
       // fails before staging, the failure branch above handles the rollback.
       await Promise.race([staged, upload.then(() => {}, () => {})]);
-      if (!wasStaged) return;
+      if (!wasStaged) { await rollBackGrantsOnce(); return; }
       // 3. Stage locally — pointer in, personal item out — and refresh.
       const { error: ptrErr } = await state.db.from('todos').insert({
         text: '', priority: 'normal', done: false,
@@ -2209,6 +2289,7 @@ async function shareExistingTodo(id, el) {
       if (ptrErr) {
         // Back out the staged shared item — it hasn't uploaded yet.
         state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+        await rollBackGrantsOnce();
         showToast(ptrErr.message, 'error');
         return;
       }
@@ -2250,7 +2331,14 @@ async function bulkShareTodoCategory(catId, el) {
           const staged = [];
           for (const todo of items) {
             const sharedId = crypto.randomUUID();
-            const payload = { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null };
+            const todoAttachmentsBulk = normalizeAttachments(todo.attachments);
+            const payload = { text: todo.text, category: cat?.name ?? '', priority: todo.priority || 'normal', note: todo.note || '', due_date: todo.due_date || null, snooze_until: todo.snooze_until || null, ...(todoAttachmentsBulk.length ? { attachments: todoAttachmentsBulk } : {}) };
+            let granted = [];
+            if (todoAttachmentsBulk.length) {
+              const grant = await shareAttachmentsWithGroup(groupId, todoAttachmentsBulk);
+              if (!grant.ok) continue; // same skip as a failed staging below
+              granted = grant.granted;
+            }
             let onStaged;
             let wasStaged = false;
             const stagedP = new Promise(resolve => { onStaged = () => { wasStaged = true; resolve(); }; });
@@ -2263,6 +2351,7 @@ async function bulkShareTodoCategory(catId, el) {
             await Promise.race([stagedP, upload.then(() => {}, () => {})]);
             if (!wasStaged) {
               console.error('[DeLaClaw] bulk share todo staging failed:', sharedId);
+              await rollbackAttachmentGrants(groupId, granted);
               continue;
             }
             const { error: ptrErr } = await state.db.from('todos').insert({
@@ -2275,10 +2364,11 @@ async function bulkShareTodoCategory(catId, el) {
             if (ptrErr) {
               // Back out the staged shared item — it hasn't uploaded yet.
               state.sharing.deleteItem(groupId, sharedId).catch(() => {});
+              await rollbackAttachmentGrants(groupId, granted);
               continue;
             }
             await state.db.from('todos').delete().eq('id', todo.id);
-            staged.push({ todo: { ...todo }, sharedId, upload });
+            staged.push({ todo: { ...todo }, sharedId, upload, granted });
           }
           // Unblock the UI on staging — the uploads run in the background.
           await refreshTodos();
@@ -2294,6 +2384,7 @@ async function bulkShareTodoCategory(catId, el) {
               // Roll the item back: drop the pointer, restore the personal row.
               await state.db.from('todos').delete().eq('shared_id', s.sharedId);
               await state.db.from('todos').insert(s.todo);
+              await rollbackAttachmentGrants(groupId, s.granted || []);
             }
           }
           await refreshTodos();
@@ -2335,6 +2426,7 @@ async function unshareTodo(id, el) {
           category_id: catIdForTodo(todo),
           sort_order: todo.sort_order || 0,
           snooze_until: todo.snooze_until || null,
+          attachments: serializeAttachments(todo.attachments),
         }).select().single();
         if (insErr) { showToast(insErr.message, 'error'); return; }
         // 2. Delete the local pointer and refresh immediately; the shared
@@ -2346,7 +2438,15 @@ async function unshareTodo(id, el) {
         const staged = new Promise(resolve => { onStaged = resolve; });
         const upload = state.sharing.deleteItem(todo.shared_group_id, todo.shared_id, { onStaged });
         upload.then(
-          () => showToast(t('sharing.unshared'), 'success'),
+          async () => {
+            // The group loses access to the unsharer's own files only — other
+            // members' files keep their grants (v2.32.135). The personal
+            // copy keeps the records, so the files stay readable for the owner.
+            for (const file of ownAttachmentFiles(todo.attachments, await myAttachmentUploaderId(todo))) {
+              try { await state.sharing.revokeFileWithGroup(todo.shared_group_id, file.drive_file_id); } catch {}
+            }
+            showToast(t('sharing.unshared'), 'success');
+          },
           async (e) => {
             console.warn('Failed to unshare todo on Drive:', e);
             if (personalRow?.id) await state.db.from('todos').delete().eq('id', personalRow.id);
@@ -2392,6 +2492,7 @@ async function copyTodoToPersonal(id, el) {
       category_id: targetCatId,
       sort_order: minOrder,
       snooze_until: todo.snooze_until || null,
+      attachments: serializeAttachments(todo.attachments),
     });
     if (insErr) { showToast(insErr.message, 'error'); return; }
     // Do NOT delete shared item — it stays for other members

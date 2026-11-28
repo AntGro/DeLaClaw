@@ -358,6 +358,14 @@
       case 'remove-list-item-attachment': callWindow('removeListItemAttachment', [getId(el), el.dataset.attachmentId, el]); break;
       case 'cancel-list-item-attachment': callWindow('cancelListItemAttachment', [getId(el), el.dataset.pendingId, el]); break;
       case 'retry-list-item-attachment': callWindow('retryListItemAttachment', [getId(el), el.dataset.pendingId, el]); break;
+      case 'attach-to-todo': callWindow('attachToTodo', [getId(el), el]); break;
+      case 'remove-todo-attachment': callWindow('removeTodoAttachment', [getId(el), el.dataset.attachmentId, el]); break;
+      case 'cancel-todo-attachment': callWindow('cancelTodoAttachment', [getId(el), el.dataset.pendingId, el]); break;
+      case 'retry-todo-attachment': callWindow('retryTodoAttachment', [getId(el), el.dataset.pendingId, el]); break;
+      case 'attach-to-habit': callWindow('attachToHabit', [getId(el), el]); break;
+      case 'remove-habit-attachment': callWindow('removeHabitAttachment', [getId(el), el.dataset.attachmentId, el]); break;
+      case 'cancel-habit-attachment': callWindow('cancelHabitAttachment', [getId(el), el.dataset.pendingId, el]); break;
+      case 'retry-habit-attachment': callWindow('retryHabitAttachment', [getId(el), el.dataset.pendingId, el]); break;
       case 'close-add-list': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeAddListModal', []); break;
       case 'save-new-list': callWindow('saveNewList', []); break;
       case 'close-edit-list': if (el.dataset.overlayClose!==undefined && e.target!==el) break; callWindow('closeEditListModal', []); break;

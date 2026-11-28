@@ -840,4 +840,14 @@ export const LOCAL_MIGRATIONS = {
       if (hasTable('settings')) db.prepare("DELETE FROM settings WHERE key IN ('archived_project_ids', 'show_archived')").run();
     }
   },
+
+  // 2.32.193: TODO and habit attachments — a JSON array of
+  // {drive_file_id, name, size, url, uploaded_by} stored as TEXT (same
+  // shape as list_items.attachments since 2.32.122, and as the sharing
+  // payload's attachments array, which holds a real array).
+  // Nothing is attached yet, so existing rows start NULL (= no attachments).
+  '2.32.193': `
+    ALTER TABLE todos ADD COLUMN attachments TEXT;
+    ALTER TABLE habits ADD COLUMN attachments TEXT;
+  `,
 };

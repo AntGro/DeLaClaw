@@ -8,6 +8,7 @@ import { esc, escQ, renderMd, formatRelativeDate, formatRelativeDay, formatSnooz
 import { initItemHoverDelay, inlineEditText, captureInnerScrollPositions, restoreInnerScrollPositions } from './item-utils.js';
 import { formatFrequency, formatHabitDue, habitDueStatus, getHabitLastDone, formatHabitRelative, getHabitCompletionCount, getHabitCategoryColor, catIdForHabit, getHabitCatDisplayName, getHabitCatPath, getHabitCatOrderKey, getHabitCategories, isMyCreatedSharedHabit, isAutoHabit } from './habits.js';
 import { getCategoryColor, getTodos, catIdForTodo, getCatDisplayName, getTodoCatPath, getTodoCatOrderKey, getTodoCategories } from './todos.js';
+import { attachmentsHtml } from './attachments.js';
 import { compareOrderKeys } from './sections-pure.js';
 import { getFlashcards, getTexts, getTextProgress } from './flashcards.js';
 import { sharedBadge } from './sharing-ui.js';
@@ -273,6 +274,7 @@ function renderFocusTodoItem(td) {
       </div>
     </div>
     ${dueDateStr || snoozeInfo ? `<div class="todo-meta">${dueDateStr}${snoozeInfo}</div>` : ''}
+    ${attachmentsHtml(td, { removable: false, i18nPrefix: 'todos' })}
   </div>`;
 }
 
@@ -362,6 +364,7 @@ function renderFocusHabitItem(habit) {
       ${dueHtml}
       ${!habit.is_draft ? `<span class="habit-last-done habit-last-done-editable" data-action="edit-habit-last-done" data-id="${esc(habit.id)}" title="${t('habits.click_to_edit_last_done')}">${lastDoneStr}</span>` : ''}
     </div>
+    ${attachmentsHtml(habit, { removable: false, i18nPrefix: 'habits' })}
   </div>`;
 }
 

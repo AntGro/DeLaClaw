@@ -31,8 +31,8 @@ User jobs:
 - **Inline edit:** `inlineEditText` for habit names with frequency picker integration in inline mode
 - **Category nav:** reorderable via long-press drag (`initNavBtnReorder`), `sort_order` persisted
 - **Cross-category drag:** `initItemDragDrop` with `crossOnly: true` — habits can be dragged between categories but not reordered within a category
-- **Search:** text filter by name across all categories
-- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Done + Edit plus a kebab menu holding snooze/history/share/copy-link/delete (see todos.md for the shared mechanism in `item-utils.js`). Welcome focus rows use the `welcome-*` variants (`welcome-mark-habit-done` + `edit-habit-inline`). Desktop unchanged.
+- **Search:** text filter by name, category name and attachment names across all categories
+- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Done + Edit plus a kebab menu holding attach/snooze/history/share/copy-link/delete (see todos.md for the shared mechanism in `item-utils.js`). Welcome focus rows use the `welcome-*` variants (`welcome-mark-habit-done` + `edit-habit-inline`). Desktop unchanged.
 
 ## Interaction Guards
 - **Pending set:** `window._pendingHabitDones = Set<habitId>`
@@ -104,6 +104,15 @@ User jobs:
 - **Explicit item deletion before category delete**: items are deleted individually before the category row so that calendar dirty tracking (`markDirty`) fires for each item. Drive/Demo have no FK enforcement, so CASCADE alone would not trigger per-item sync
 - Protected default row (`name=''`, `is_protected=1`) cannot be deleted
 - Category nav order persisted via `sort_order`, reorderable by long-press drag
+
+### Attachments (v2.32.193)
+- Same mechanism as list items — see the lists contract for the upload/record/delete model. The generic helpers and queue live in `js/attachments.js`; `habits.js` wires a `habitAttachments` queue instance and `saveHabitAttachments`.
+- The paperclip sits in `.habit-actions`, rendered only when Drive can upload (`canAttach = typeof state.driveAdapter?.uploadAttachment === 'function'`). On touch, Attach is NOT a primary — Done + Edit stay the primaries and Attach falls into the kebab automatically (`splitRowActions` caps primaries at 2).
+- Records live in the `habits.attachments` TEXT column (migration 2.32.193, both backends; JSON string, same shape as `list_items.attachments` since 2.32.122). In-memory `habit.attachments` is always the parsed, validated array.
+- Shared habits carry the records **top-level** on the shared habit object (`sh.attachments`, not `payload.attachments`) — the load enrichment reads them from there, and shared writes go through `state.sharing.updateSharedHabit(groupId, sharedId, { attachments })`. The join-backfill sweep reads both shapes (`ownAttachmentFileIds` checks `payload?.attachments ?? attachments`) and scans lists, todos and habits.
+- Attachments live on the habit itself, never on its completions: deleting a habit trashes only the deleter's own files and leaves the completions path untouched. Category and section-subtree deletes trash the deleted habits' own files with the batch reference check.
+- Sharing an existing habit or bulk-sharing a category sets `attachments` on the shared habit object and grants each file reader to the group first (`shareAttachmentsWithGroup`) — a grant failure aborts the share (single) or skips the item (bulk), and any grants already issued are rolled back on a later failure. Unsharing revokes the group's access to the unsharer's own files only (`revokeFileWithGroup`); unshare and copy-to-personal both carry the records into the personal row.
+- Search matches attachment names. Welcome focus rows show read-only chips (`attachmentsHtml` with `removable: false`) — attach and remove happen only on the Habits page.
 
 ## Adapter & Backend
 - `db.from('habits')`, `db.from('habit_completions')`, `db.from('habit_categories')`

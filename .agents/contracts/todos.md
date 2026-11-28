@@ -26,14 +26,14 @@ User jobs:
 
 ## UI / UX
 - **Reused components:** `.page-empty-state`, `.modal`, `.btn`, `.project-card`, `.category-nav-btn`, `.empty-state`, toast
-- **Search:** `filterTodos` / `todoSearchQuery` — filters across TODO text and notes; clear via CSS `:not(:placeholder-shown)`
+- **Search:** `filterTodos` / `todoSearchQuery` — filters across TODO text, category name and attachment names; clear via CSS `:not(:placeholder-shown)`
 - **Filter tabs:** `setTodoFilter` with 3 modes: `pending` (active, not snoozed), `done`, `snoozed`
 - **Category nav:** reorderable via long-press drag (`initNavBtnReorder`), `sort_order` persisted; displays shortname or name with `--cat-color`
 - **Cross-category drag:** `initItemDragDrop` with `crossContainerSelector` — TODOs draggable between categories, updates `category_id` FK and re-numbers `sort_order`
 - **Scroll-edge shadows (v2.32.185):** same helper as lists — see the lists contract; the TODO category lists carry the top/bottom inset shadow while there is more content in that direction.
 - **Inline edit:** note field via `inlineEditText`, preserves whitespace
 - **Done section:** `toggleDoneTodos` shows/hides completed items per category; `deleteAllDoneTodos` bulk-deletes done items in a category
-- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Done + Edit plus a kebab menu holding snooze/share/copy-link/delete. On touch-first devices, row actions must stay comfortable for touch manipulation, which may require different sizes and gaps from desktop. The menu rows are clones of the row's own buttons, so they fire the same `data-action` via delegation; the menu closes on outside tap, Escape, or scroll. **Kebab menu keyboard support (v2.32.169):** the kebab carries `aria-haspopup="menu"`, `aria-expanded` and `aria-controls` (the shared menu's id is `rowActionsMenu`, matching the groups add-menu convention); each clone carries `role="menuitem"` with roving tabindex (first item tabbable); opening the menu moves focus to its first item; Up/Down (wrap) and Home/End move focus between items; Escape, Tab, and choosing an item close the menu and return focus to the kebab (outside taps and scroll close without stealing focus). Mechanism lives in `item-utils.js` (`TOUCH_PRIMARY_ACTIONS` / `splitRowActions` / `compactRowActionsForTouch`, run inside `initItemHoverDelay`'s touch branch). Welcome focus rows use the `welcome-*` variants (Done + Edit). Desktop unchanged.
+- **Touch row actions (v2.32.146):** on touch-first devices (`html.touch`, set at boot from `isTouchDevice()`), a row shows Done + Edit plus a kebab menu holding attach/snooze/share/copy-link/delete. On touch-first devices, row actions must stay comfortable for touch manipulation, which may require different sizes and gaps from desktop. The menu rows are clones of the row's own buttons, so they fire the same `data-action` via delegation; the menu closes on outside tap, Escape, or scroll. **Kebab menu keyboard support (v2.32.169):** the kebab carries `aria-haspopup="menu"`, `aria-expanded` and `aria-controls` (the shared menu's id is `rowActionsMenu`, matching the groups add-menu convention); each clone carries `role="menuitem"` with roving tabindex (first item tabbable); opening the menu moves focus to its first item; Up/Down (wrap) and Home/End move focus between items; Escape, Tab, and choosing an item close the menu and return focus to the kebab (outside taps and scroll close without stealing focus). Mechanism lives in `item-utils.js` (`TOUCH_PRIMARY_ACTIONS` / `splitRowActions` / `compactRowActionsForTouch`, run inside `initItemHoverDelay`'s touch branch). Welcome focus rows use the `welcome-*` variants (Done + Edit). Desktop unchanged.
 
 ## Interaction Guards
 - **Pending set:** `_pendingTodoToggles = Set<todoId>` for done/undone toggle
@@ -93,6 +93,14 @@ User jobs:
 - `unshareTodo` — remove a TODO from sharing
 - `copyTodoToPersonal` — copy a shared TODO into personal collection
 - `syncSharedTodos()` merges shared items by `todo_id`
+
+### Attachments (v2.32.193)
+- Same mechanism as list items — see the lists contract for the upload/record/delete model. The generic helpers and queue live in `js/attachments.js`; `todos.js` wires a `todoAttachments` queue instance and `saveTodoAttachments`.
+- The paperclip sits in `.todo-actions`, rendered only when Drive can upload (`canAttach = typeof state.driveAdapter?.uploadAttachment === 'function'`). On touch, Attach is NOT a primary — Done + Edit stay the primaries and Attach falls into the kebab automatically (`splitRowActions` caps primaries at 2).
+- Records live in the `todos.attachments` TEXT column (migration 2.32.193, both backends; JSON string, same shape as `list_items.attachments` since 2.32.122). In-memory `todo.attachments` is always the parsed, validated array.
+- Shared TODOs carry the records in the sharing payload (`payload.attachments`, real array) — the load enrichment copies `sh.payload?.attachments` into `todo.attachments`; the pointer row's column is never the source of truth. Shared writes go through `state.sharing.updateItem` with a `{ payload: { ...currentPayload, attachments } }` partial update.
+- Sharing an existing TODO or bulk-sharing a category carries the records into the payload and grants each file reader to the group first (`shareAttachmentsWithGroup`) — a grant failure aborts the share (single) or skips the item (bulk), and any grants already issued are rolled back on a later failure. Unsharing revokes the group's access to the unsharer's own files only (`revokeFileWithGroup`); unshare and copy-to-personal both carry the records into the personal row.
+- Deletes (single, clear-done, category, section subtree) trash only the deleter's own files with the batch reference check (`trashOwnItemAttachments`, batch excludeKeys). Search matches attachment names. Welcome focus rows show read-only chips (`attachmentsHtml` with `removable: false`) — attach and remove happen only on the TODOs page.
 
 ## Adapter & Backend
 - Only via `db.from('todos')`, `db.from('todo_categories')` — never backend-specific branches in views

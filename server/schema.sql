@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS todos (
   shared_id TEXT,
   shared_group_id TEXT,
   owner_id TEXT,
+  attachments TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -103,6 +104,7 @@ CREATE TABLE IF NOT EXISTS habits (
   shared_id TEXT,
   shared_group_id TEXT,
   owner_id TEXT,
+  attachments TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );

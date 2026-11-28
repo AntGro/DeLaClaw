@@ -84,7 +84,7 @@ function sharedHabitCompletions() {
 // ── ENGLISH ──
 function en() {
   const todos = [
-    { id: 'demo-todo-001', text: 'Buy groceries (avocados, oat milk, spinach)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-todo-001', text: 'Buy groceries (avocados, oat milk, spinach)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), attachments: [{ drive_file_id: 'demo-attachment-003', name: 'shopping-list.pdf', size: 48210, url: 'https://drive.google.com/file/d/demo-shopping-list/view', uploaded_by: 'demo' }], created_at: d(-2), updated_at: d(-2) },
     { id: 'demo-todo-002', text: 'Schedule dentist appointment', done: false, priority: 'normal', category: 'Health', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
     { id: 'demo-todo-003', text: 'Renew gym membership', done: false, priority: 'normal', category: 'Health', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-todo-004', text: 'Send birthday card to Mum', done: false, priority: 'high', category: 'Family', sort_order: 3, due_date: dateOnly(3), created_at: d(-1), updated_at: d(-1) },
@@ -101,7 +101,7 @@ function en() {
   ];
 
   const habits = [
-    { id: 'demo-habit-001', name: 'Morning run (5 km)', frequency_rule: 'every_N_days:1', category: 'Fitness', is_draft: false, next_due: null, sort_order: 0, created_at: d(-60), updated_at: d(-1) },
+    { id: 'demo-habit-001', name: 'Morning run (5 km)', frequency_rule: 'every_N_days:1', category: 'Fitness', is_draft: false, next_due: null, sort_order: 0, attachments: [{ drive_file_id: 'demo-attachment-004', name: 'training-plan.pdf', size: 184320, url: 'https://drive.google.com/file/d/demo-training-plan/view', uploaded_by: 'demo' }], created_at: d(-60), updated_at: d(-1) },
     { id: 'demo-habit-002', name: 'Read 30 minutes', frequency_rule: 'every_N_days:1', category: 'Learning', is_draft: false, next_due: null, sort_order: 1, created_at: d(-45), updated_at: d(-1) },
     { id: 'demo-habit-003', name: 'Meditate', frequency_rule: 'every_N_days:1', category: 'Wellbeing', is_draft: false, next_due: null, sort_order: 2, created_at: d(-40), updated_at: d(-2) },
     { id: 'demo-habit-004', name: 'Practice guitar', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Creative', is_draft: false, next_due: null, sort_order: 3, created_at: d(-30), updated_at: d(-3) },
@@ -205,7 +205,7 @@ function en() {
 // ── FRENCH ──
 function fr() {
   const todos = [
-    { id: 'demo-todo-001', text: 'Faire les courses (avocat, lait d\'avoine, épinards)', done: false, priority: 'urgent', category: 'Personnel', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-todo-001', text: 'Faire les courses (avocat, lait d\'avoine, épinards)', done: false, priority: 'urgent', category: 'Personnel', sort_order: 0, due_date: dateOnly(1), attachments: [{ drive_file_id: 'demo-attachment-003', name: 'liste-courses.pdf', size: 48210, url: 'https://drive.google.com/file/d/demo-shopping-list/view', uploaded_by: 'demo' }], created_at: d(-2), updated_at: d(-2) },
     { id: 'demo-todo-002', text: 'Prendre rendez-vous chez le dentiste', done: false, priority: 'normal', category: 'Santé', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
     { id: 'demo-todo-003', text: 'Renouveler l\'abonnement salle de sport', done: false, priority: 'normal', category: 'Santé', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-todo-004', text: 'Envoyer une carte d\'anniversaire à Maman', done: false, priority: 'high', category: 'Famille', sort_order: 3, due_date: dateOnly(3), created_at: d(-1), updated_at: d(-1) },
@@ -222,7 +222,7 @@ function fr() {
   ];
 
   const habits = [
-    { id: 'demo-habit-001', name: 'Course matinale (5 km)', frequency_rule: 'every_N_days:1', category: 'Sport', is_draft: false, next_due: null, sort_order: 0, created_at: d(-60), updated_at: d(-1) },
+    { id: 'demo-habit-001', name: 'Course matinale (5 km)', frequency_rule: 'every_N_days:1', category: 'Sport', is_draft: false, next_due: null, sort_order: 0, attachments: [{ drive_file_id: 'demo-attachment-004', name: 'plan-entrainement.pdf', size: 184320, url: 'https://drive.google.com/file/d/demo-training-plan/view', uploaded_by: 'demo' }], created_at: d(-60), updated_at: d(-1) },
     { id: 'demo-habit-002', name: 'Lire 30 minutes', frequency_rule: 'every_N_days:1', category: 'Apprentissage', is_draft: false, next_due: null, sort_order: 1, created_at: d(-45), updated_at: d(-1) },
     { id: 'demo-habit-003', name: 'Méditer', frequency_rule: 'every_N_days:1', category: 'Bien-être', is_draft: false, next_due: null, sort_order: 2, created_at: d(-40), updated_at: d(-2) },
     { id: 'demo-habit-004', name: 'Pratiquer la guitare', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Créativité', is_draft: false, next_due: null, sort_order: 3, created_at: d(-30), updated_at: d(-3) },
@@ -321,7 +321,7 @@ function fr() {
 // ── SPANISH ──
 function es() {
   const todos = [
-    { id: 'demo-todo-001', text: 'Comprar víveres (aguacate, leche de avena, espinacas)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), created_at: d(-2), updated_at: d(-2) },
+    { id: 'demo-todo-001', text: 'Comprar víveres (aguacate, leche de avena, espinacas)', done: false, priority: 'urgent', category: 'Personal', sort_order: 0, due_date: dateOnly(1), attachments: [{ drive_file_id: 'demo-attachment-003', name: 'lista-compra.pdf', size: 48210, url: 'https://drive.google.com/file/d/demo-shopping-list/view', uploaded_by: 'demo' }], created_at: d(-2), updated_at: d(-2) },
     { id: 'demo-todo-002', text: 'Pedir cita con el dentista', done: false, priority: 'normal', category: 'Salud', sort_order: 1, due_date: dateOnly(7), created_at: d(-10), updated_at: d(-10) },
     { id: 'demo-todo-003', text: 'Renovar membresía del gimnasio', done: false, priority: 'normal', category: 'Salud', sort_order: 2, due_date: dateOnly(14), created_at: d(-5), updated_at: d(-5) },
     { id: 'demo-todo-004', text: 'Enviar tarjeta de cumpleaños a Mamá', done: false, priority: 'high', category: 'Familia', sort_order: 3, due_date: dateOnly(3), created_at: d(-1), updated_at: d(-1) },
@@ -338,7 +338,7 @@ function es() {
   ];
 
   const habits = [
-    { id: 'demo-habit-001', name: 'Carrera matutina (5 km)', frequency_rule: 'every_N_days:1', category: 'Deporte', is_draft: false, next_due: null, sort_order: 0, created_at: d(-60), updated_at: d(-1) },
+    { id: 'demo-habit-001', name: 'Carrera matutina (5 km)', frequency_rule: 'every_N_days:1', category: 'Deporte', is_draft: false, next_due: null, sort_order: 0, attachments: [{ drive_file_id: 'demo-attachment-004', name: 'plan-entrenamiento.pdf', size: 184320, url: 'https://drive.google.com/file/d/demo-training-plan/view', uploaded_by: 'demo' }], created_at: d(-60), updated_at: d(-1) },
     { id: 'demo-habit-002', name: 'Leer 30 minutos', frequency_rule: 'every_N_days:1', category: 'Aprendizaje', is_draft: false, next_due: null, sort_order: 1, created_at: d(-45), updated_at: d(-1) },
     { id: 'demo-habit-003', name: 'Meditar', frequency_rule: 'every_N_days:1', category: 'Bienestar', is_draft: false, next_due: null, sort_order: 2, created_at: d(-40), updated_at: d(-2) },
     { id: 'demo-habit-004', name: 'Practicar guitarra', frequency_rule: 'every_N_weeks:1:Mon,Wed,Fri', category: 'Creatividad', is_draft: false, next_due: null, sort_order: 3, created_at: d(-30), updated_at: d(-3) },

@@ -731,4 +731,18 @@ export const DRIVE_MIGRATIONS = {
       }
     }
   },
+
+  '2.32.193': async (store) => {
+    // 2.32.193: TODO and habit attachments — canonical storage is a JSON
+    // string (same as the Local TEXT column, and as list_items since
+    // 2.32.122). A row holding a real array (e.g. hand-edited store) is
+    // stringified so backup/restore and the read normalizer see one shape
+    // everywhere. Missing stays missing.
+    for (const row of (store.todos || [])) {
+      if (Array.isArray(row.attachments)) row.attachments = JSON.stringify(row.attachments);
+    }
+    for (const row of (store.habits || [])) {
+      if (Array.isArray(row.attachments)) row.attachments = JSON.stringify(row.attachments);
+    }
+  },
 };

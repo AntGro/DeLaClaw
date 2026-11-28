@@ -74,12 +74,12 @@ The Google Drive sharing adapter is the only sharing path. Drive sharing has no 
 flowchart LR
     subgraph CD["Creator's Drive"]
         direction TB
-        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · events.json · groups.json<br/>attachments/{itemId}/ <i>(list-item files)</i>"]
+        CDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json<br/>lists.json · events.json · groups.json<br/>attachments/{itemId}/ <i>(item files)</i>"]
         CDS["My Drive/DeLaClaw-Shared/ <i>(shared root)</i><br/>DeLaClaw-Shared-{groupId}/<br/>group.json · todos.json · habits.json<br/>lists.json · events.json · extra_1..10.json<br/>messages.json · games.json"]
     end
     subgraph JD["Joiner's Drive"]
         direction TB
-        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json · events.json<br/>groups.json &#9668; <b>pointers + own-group names</b><br/>{id, folderId, fileIds} · {id, name}<br/>attachments/{itemId}/ <i>(list-item files)</i>"]
+        JDP["My Drive/DeLaClaw/ <i>(personal)</i><br/>todos.json · habits.json · lists.json · events.json<br/>groups.json &#9668; <b>pointers + own-group names</b><br/>{id, folderId, fileIds} · {id, name}<br/>attachments/{itemId}/ <i>(item files)</i>"]
     end
 ```
 
@@ -351,7 +351,7 @@ sequenceDiagram
     end
 
     rect rgb(253, 237, 236)
-    opt mutation adds an attachment (list item)
+    opt mutation adds an attachment (any item)
         MA->>MD: upload file to the item's folder<br/>then shareFileWithGroup per file (reader)
         opt a grant fails
             MA->>MA: attach aborted — error toast<br/>file stays unlinked in the uploader's Drive
@@ -387,9 +387,9 @@ sequenceDiagram
 
 #### Attachments
 
-List items can carry file attachments — the mechanics (upload, progress, same-name handling, the record-is-truth rule, deletion) are documented in [Lists](lists.md#attachments). This section covers only the group rules.
+List items, TODOs and Habits can carry file attachments — the mechanics (upload, progress, same-name handling, the record-is-truth rule, deletion) are documented in [Lists](lists.md#attachments). This section covers only the group rules.
 
-Attaching a file to a shared list item follows the same modify path for the link itself (the attachment record joins the payload), with one extra step before the payload update: the file lives in the uploader's own Drive, so it is shared with every other joined member as reader (`shareFileWithGroup`). Member emails are read at runtime from the group folder's permission list and never stored. Sharing an existing item with attachments carries its records into the payload the same way, granting each file reader to the group first — a grant failure aborts the share and the item stays personal; the bulk share does the same per item, skipping the ones whose grants fail. Access level is reader by default: readers cannot re-share or delete, and the owner may also disable download/print/copy per file. A member who joins later still sees the attachment (name, size, link — the join downloads the current item files) and gets file access through the grant sweep: every member's client grants its own files reader to the new member, on group load and when the poll spots the fresh join. A failed grant is silent and retried on the next load or fresh join. When the sweep grants your files, you see a toast naming the new member. Until the sweep runs, clicking the link lands on Drive's request-access page. Unsharing an item revokes the group's access to your own files on it (`revokeFileWithGroup`); another member's files keep their grants — only their owner can revoke them. Leaving a group with keep-copies, copying a shared item to personal, and the personal copy made by unsharing all keep the original attachment records, still pointing at the shared files. Deleting a whole list trashes your own attachments on every item in it, the same as deleting each item; deleting a section does the same for its whole subtree.
+Attaching a file to a shared item follows the same modify path for the link itself (the attachment record joins the payload for list items and TODOs, and the shared habit object top-level for habits), with one extra step before the payload update: the file lives in the uploader's own Drive, so it is shared with every other joined member as reader (`shareFileWithGroup`). Member emails are read at runtime from the group folder's permission list and never stored. Sharing an existing item with attachments carries its records into the payload the same way, granting each file reader to the group first — a grant failure aborts the share and the item stays personal; the bulk share does the same per item, skipping the ones whose grants fail. Access level is reader by default: readers cannot re-share or delete, and the owner may also disable download/print/copy per file. A member who joins later still sees the attachment (name, size, link — the join downloads the current item files) and gets file access through the grant sweep (which scans list items, TODOs and habits): every member's client grants its own files reader to the new member, on group load and when the poll spots the fresh join. A failed grant is silent and retried on the next load or fresh join. When the sweep grants your files, you see a toast naming the new member. Until the sweep runs, clicking the link lands on Drive's request-access page. Unsharing an item revokes the group's access to your own files on it (`revokeFileWithGroup`); another member's files keep their grants — only their owner can revoke them. Leaving a group with keep-copies, copying a shared item to personal, and the personal copy made by unsharing all keep the original attachment records, still pointing at the shared files. Deleting a whole list trashes your own attachments on every item in it, the same as deleting each item; deleting a section does the same for its whole subtree — the same holds for clearing done TODOs and for deleting a TODO or habit category or section subtree.
 
 #### Delete an item
 
@@ -424,7 +424,7 @@ sequenceDiagram
     end
     end
     rect rgb(253, 237, 236)
-    opt item has attachments (list item)
+    opt item has attachments (any item)
         MA->>MD: trash my recorded files + my folder<br/>only files whose uploaded_by is mine —<br/>other members' files never attempted
     end
     end

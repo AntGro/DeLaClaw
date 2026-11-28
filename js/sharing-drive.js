@@ -332,7 +332,9 @@ function ownAttachmentFileIds(items, myId) {
   const ids = new Set();
   if (!myId || !Array.isArray(items)) return [];
   for (const item of items) {
-    const atts = item?.payload?.attachments;
+    // Shared TODOs and list items carry attachments in the payload;
+    // shared habits carry them top-level (v2.32.193).
+    const atts = item?.payload?.attachments ?? item?.attachments;
     if (!Array.isArray(atts)) continue;
     for (const a of atts) {
       if (a && a.drive_file_id && a.uploaded_by === myId) ids.add(a.drive_file_id);
@@ -1791,11 +1793,15 @@ export function createDriveSharing(getToken, personalFolderId, capabilities = {}
       const myId = await currentMemberId(groupId).catch(() => null);
       if (!myId) return [];
       const granted = [];
-      for (const fileId of ownAttachmentFileIds(e.typeData['lists'] || [], myId)) {
-        try {
-          granted.push(...await this.shareFileWithGroup(groupId, fileId, 'reader'));
-        } catch (err) {
-          console.warn(`sharing: attachment grant sweep failed for ${fileId}:`, err);
+      // Lists and TODOs carry attachments in the payload; habits top-level
+      // (ownAttachmentFileIds reads both shapes). One pass per type.
+      for (const type of ['lists', 'todos', 'habits']) {
+        for (const fileId of ownAttachmentFileIds(e.typeData[type] || [], myId)) {
+          try {
+            granted.push(...await this.shareFileWithGroup(groupId, fileId, 'reader'));
+          } catch (err) {
+            console.warn(`sharing: attachment grant sweep failed for ${fileId}:`, err);
+          }
         }
       }
       const memberIds = [...new Set(granted)];

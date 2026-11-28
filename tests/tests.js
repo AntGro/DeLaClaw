@@ -1647,7 +1647,7 @@ test('demo adapter: restoring a pre-2.0.9 backup runs the full migration chain',
     '2.32.190 must run after the older Drive-context migrations');
   assert(!('projects' in store) && !('vestiaire' in store),
     'the source tables must be deleted by their migrations');
-  assert(store.settings.find((s) => s.key === 'schema_version').value === '2.32.190',
+  assert(store.settings.find((s) => s.key === 'schema_version').value === '2.32.193',
     'schema_version must end at the latest migration');
 });
 
@@ -10196,11 +10196,27 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     // List item attachments (v2.32.122)
     // ===================================================================
     function loadAttachmentHelpers() {
+      // The pure helpers moved to the shared module (v2.32.193); the
+      // list-item-specific ones stayed in lists.js (loadListItemHelpers).
+      const attJs = jsFiles['attachments.js'];
+      const start = attJs.indexOf('// ── Pure attachment helpers ──');
+      const end = attJs.indexOf('// ── End pure attachment helpers ──');
+      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in attachments.js');
+      return new Function(`${attJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, ownAttachmentFiles, referencedFileIdsFromItems, memberDisplayName };`)();
+    }
+
+    function loadListItemHelpers() {
+      // The list-item helpers call normalizeAttachments, which now lives
+      // in the shared module — concatenate both pure blocks.
+      const attJs = jsFiles['attachments.js'];
+      const attStart = attJs.indexOf('// ── Pure attachment helpers ──');
+      const attEnd = attJs.indexOf('// ── End pure attachment helpers ──');
       const listsJs = jsFiles['lists.js'];
-      const start = listsJs.indexOf('// ── Pure attachment helpers ──');
-      const end = listsJs.indexOf('// ── End pure attachment helpers ──');
-      assert(start !== -1 && end > start, 'could not find the pure attachment helpers block in lists.js');
-      return new Function(`${listsJs.slice(start, end)}; return { normalizeAttachments, serializeAttachments, formatFileSize, isDriveAttachmentUrl, sharedListItemPayload, ownAttachmentFiles, referencedFileIdsFromItems, memberDisplayName, listItemMatchesSearch };`)();
+      const start = listsJs.indexOf('// ── Pure list-item helpers ──');
+      const end = listsJs.indexOf('// ── End pure list-item helpers ──');
+      assert(attStart !== -1 && attEnd > attStart, 'could not find the pure attachment helpers block in attachments.js');
+      assert(start !== -1 && end > start, 'could not find the pure list-item helpers block in lists.js');
+      return new Function(`${attJs.slice(attStart, attEnd)}; ${listsJs.slice(start, end)}; return { sharedListItemPayload, listItemMatchesSearch };`)();
     }
 
     test('lists: normalizeAttachments accepts string, array and missing; drops invalid entries', () => {
@@ -10241,7 +10257,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     });
 
     test('lists: listItemMatchesSearch matches text, note and attachment names', () => {
-      const { listItemMatchesSearch } = loadAttachmentHelpers();
+      const { listItemMatchesSearch } = loadListItemHelpers();
       const item = {
         text: 'Train ticket',
         note: 'Booked for Friday',
@@ -10278,17 +10294,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     });
 
     test('lists: attachment chips show the uploader in the tooltip on shared items', () => {
-      const listsSrc = jsFiles['lists.js'];
-      const chipStart = listsSrc.indexOf('const attachmentsHtml');
-      const chipEnd = listsSrc.indexOf('\n  }\n', chipStart);
-      const chipFn = listsSrc.slice(chipStart, chipEnd);
+      const attSrc = jsFiles['attachments.js'];
+      const chipStart = attSrc.indexOf('function attachmentsHtml');
+      const chipEnd = attSrc.indexOf('\n}\n', chipStart);
+      const chipFn = attSrc.slice(chipStart, chipEnd);
       assert(chipFn.includes('attachmentUploaderName(item, a.uploaded_by)'),
         'each chip must resolve its uploader from the record');
-      assert(chipFn.includes("t('lists.attachment_uploaded_by', uploader)"),
+      assert(chipFn.includes("t(`${i18nPrefix}.attachment_uploaded_by`, uploader)"),
         'the tooltip must name the uploader');
-      const helperStart = listsSrc.indexOf('function attachmentUploaderName');
-      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
-      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      const helperStart = attSrc.indexOf('function attachmentUploaderName');
+      const helperEnd = attSrc.indexOf('\n}\n', helperStart);
+      const helperFn = attSrc.slice(helperStart, helperEnd);
       assert(helperFn.includes('state.sharing?.getGroup?.(item.shared_group_id)'),
         'the uploader must resolve from the group row');
       assert(helperFn.includes('if (!item?.shared_group_id || !uploadedBy) return null;'),
@@ -10337,29 +10353,30 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('lists: deleting or unchipping never trashes a file another item still references', () => {
       const listsSrc = jsFiles['lists.js'];
-      const helperStart = listsSrc.indexOf('async function trashOwnItemAttachments');
-      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
-      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      const attSrc = jsFiles['attachments.js'];
+      const helperStart = attSrc.indexOf('async function trashOwnItemAttachments');
+      const helperEnd = attSrc.indexOf('\n}\n', helperStart);
+      const helperFn = attSrc.slice(helperStart, helperEnd);
       assert(helperFn.includes('if (referenced.has(a.drive_file_id)) continue;'),
         'the trash helper must skip every file another item still references');
       assert(helperFn.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'),
         'the trash helper must hand the reference set to the folder trash');
-      const rmStart = listsSrc.indexOf('async function removeListItemAttachment');
-      const rmEnd = listsSrc.indexOf('\n}\n', rmStart);
-      const rmFn = listsSrc.slice(rmStart, rmEnd);
-      assert(rmFn.includes('referencedAttachmentFileIds(new Set([item.id, item.shared_id].filter(Boolean)))'),
+      const rmStart = attSrc.indexOf('async function remove(itemId, driveFileId, btnEl)');
+      const rmEnd = attSrc.indexOf("showToast(t(`${i18nPrefix}.attachment_removed`), 'success');", rmStart);
+      const rmFn = attSrc.slice(rmStart, rmEnd);
+      assert(rmFn.includes('referencedAttachmentFileIds(getLocalItems(), new Set([item.id, item.shared_id].filter(Boolean)))'),
         'removing a chip must check whether another item still references the file');
       assert(rmFn.includes('if (!referenced.has(driveFileId))'),
         'removing a chip must skip the trash when the file is still referenced');
       const listStart = listsSrc.indexOf('async function deleteList(');
       const listEnd = listsSrc.indexOf('\n}\n', listStart);
       const listFn = listsSrc.slice(listStart, listEnd);
-      assert(listFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+      assert(listFn.includes('await trashOwnItemAttachments(item, state.allListItems, excludeKeys)'),
         'deleting a list must exclude the whole batch from the reference check');
       const secStart = listsSrc.indexOf('async function deleteListSectionSubtree');
       const secEnd = listsSrc.indexOf('\n}\n', secStart);
       const secFn = listsSrc.slice(secStart, secEnd);
-      assert(secFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+      assert(secFn.includes('await trashOwnItemAttachments(item, state.allListItems, excludeKeys)'),
         'deleting a section must exclude the whole subtree from the reference check');
     });
 
@@ -10382,18 +10399,19 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const delStart = listsSrc.indexOf('async function deleteListItem');
       const delEnd = listsSrc.indexOf('// ── List item attachments', delStart);
       const delFn = listsSrc.slice(delStart, delEnd);
-      assert(delFn.includes('await trashOwnItemAttachments(item)'),
+      assert(delFn.includes('await trashOwnItemAttachments(item, state.allListItems)'),
         'item deletion must trash only my own attachments');
       assert(!delFn.includes("normalizeAttachments(item.attachments)) {\n        try { await state.driveAdapter?.trashAttachmentFile"),
         'item deletion must not trash the unfiltered attachment list');
-      const helperStart = listsSrc.indexOf('async function trashOwnItemAttachments');
-      const helperEnd = listsSrc.indexOf('\n}\n', helperStart);
-      const helperFn = listsSrc.slice(helperStart, helperEnd);
+      const attSrc = jsFiles['attachments.js'];
+      const helperStart = attSrc.indexOf('async function trashOwnItemAttachments');
+      const helperEnd = attSrc.indexOf('\n}\n', helperStart);
+      const helperFn = attSrc.slice(helperStart, helperEnd);
       assert(helperFn.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'),
         'the shared trash helper must still trash my own attachments folder');
-      const remStart = listsSrc.indexOf('async function removeListItemAttachment');
-      const remEnd = listsSrc.indexOf('// ===================================================================\n// CRUD — LISTS', remStart);
-      const remFn = listsSrc.slice(remStart, remEnd);
+      const remStart = attSrc.indexOf('async function remove(itemId, driveFileId, btnEl)');
+      const remEnd = attSrc.indexOf("showToast(t(`${i18nPrefix}.attachment_removed`), 'success');", remStart);
+      const remFn = attSrc.slice(remStart, remEnd);
       assert(remFn.includes('target.uploaded_by === myId'),
         'removing a chip must trash the file only when it is mine');
     });
@@ -10456,14 +10474,15 @@ test('share popover is viewport-bound with scrollable group and member lists', (
 
     test('lists: a failed share rolls back the grants already issued, and only those', async () => {
       const listsSrc = jsFiles['lists.js'];
-      const start = listsSrc.indexOf('async function shareAttachmentsWithGroup');
-      assert(start !== -1, 'could not find shareAttachmentsWithGroup in lists.js');
-      const rbStart = listsSrc.indexOf('async function rollbackAttachmentGrants', start);
-      assert(rbStart !== -1, 'could not find rollbackAttachmentGrants in lists.js');
-      const end = listsSrc.indexOf('\n}\n', rbStart);
+      const attSrc = jsFiles['attachments.js'];
+      const start = attSrc.indexOf('async function shareAttachmentsWithGroup');
+      assert(start !== -1, 'could not find shareAttachmentsWithGroup in attachments.js');
+      const rbStart = attSrc.indexOf('async function rollbackAttachmentGrants', start);
+      assert(rbStart !== -1, 'could not find rollbackAttachmentGrants in attachments.js');
+      const end = attSrc.indexOf('\n}\n', rbStart);
       assert(end !== -1, 'could not find the end of rollbackAttachmentGrants');
       const makeFns = (sharing) => new Function('state',
-        `${listsSrc.slice(start, end + 3)}; return { shareAttachmentsWithGroup, rollbackAttachmentGrants };`)({ sharing });
+        `${attSrc.slice(start, end + 3)}; return { shareAttachmentsWithGroup, rollbackAttachmentGrants };`)({ sharing });
       const revoked = [];
       const sharing = {
         shareFileWithGroup: async (groupId, fileId) => {
@@ -10502,7 +10521,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'bulk share must roll back on staging failures');
       assert(listsSrc.includes('await rollbackAttachmentGrants(groupId, s.granted);'),
         'bulk share must roll back a staged item whose upload later fails');
-      assert(listsSrc.includes("await rollbackAttachmentGrants(item.shared_group_id, [{ fileId: record.drive_file_id, memberIds: grantedIds }]);"),
+      assert(attSrc.includes("await rollbackAttachmentGrants(item.shared_group_id, [{ fileId: record.drive_file_id, memberIds: grantedIds }]);"),
         'the upload path must roll back when the attach does not land');
       // The targeted revoke must only touch the members passed in.
       const driveSrc = jsFiles['sharing-drive.js'];
@@ -10533,17 +10552,17 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       const delStart = listsSrc.indexOf('async function deleteListItem');
       const delEnd = listsSrc.indexOf('// ── List item attachments', delStart);
       const delFn = listsSrc.slice(delStart, delEnd);
-      assert(delFn.includes('await trashOwnItemAttachments(item)'), 'item deletion must use the shared trash helper');
+      assert(delFn.includes('await trashOwnItemAttachments(item, state.allListItems)'), 'item deletion must use the shared trash helper');
       assert(!delFn.includes('trashAttachmentFile?.('), 'item deletion must not keep its own inline trash loop');
       const listStart = listsSrc.indexOf('async function deleteList(');
       const listEnd = listsSrc.indexOf('\n}\n', listStart);
       const listFn = listsSrc.slice(listStart, listEnd);
-      assert(listFn.includes('for (const item of items)') && listFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+      assert(listFn.includes('for (const item of items)') && listFn.includes('await trashOwnItemAttachments(item, state.allListItems, excludeKeys)'),
         'deleting a list must trash my own attachments on every item in it');
       const secStart = listsSrc.indexOf('async function deleteListSectionSubtree');
       const secEnd = listsSrc.indexOf('\n}\n', secStart);
       const secFn = listsSrc.slice(secStart, secEnd);
-      assert(secFn.includes('for (const item of itemRows)') && secFn.includes('await trashOwnItemAttachments(item, excludeKeys)'),
+      assert(secFn.includes('for (const item of itemRows)') && secFn.includes('await trashOwnItemAttachments(item, state.allListItems, excludeKeys)'),
         'deleting a section must trash my own attachments on every item in the subtree');
     });
 
@@ -10568,7 +10587,7 @@ test('share popover is viewport-bound with scrollable group and member lists', (
     });
 
     test('lists: sharedListItemPayload carries attachments only when the item has any', () => {
-      const { sharedListItemPayload } = loadAttachmentHelpers();
+      const { sharedListItemPayload } = loadListItemHelpers();
       const item = { text: 'Train ticket', note: 'refundable', attachments: [
         { drive_file_id: 'f1', name: 'a.pdf', size: 120, url: 'https://drive.google.com/file/d/f1/view', uploaded_by: 'member-abc123' },
       ] };
@@ -10679,19 +10698,37 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'the Drive migration must normalize list_items attachments');
     });
 
+    test('migrations: todos and habits gain the attachments column in 2.32.193', () => {
+      const schema = fs.readFileSync(path.join(__dirname, '..', 'server', 'schema.sql'), 'utf-8');
+      assert(/CREATE TABLE IF NOT EXISTS todos \([^;]*attachments TEXT/.test(schema),
+        'schema.sql must add attachments TEXT to todos');
+      assert(/CREATE TABLE IF NOT EXISTS habits \([^;]*attachments TEXT/.test(schema),
+        'schema.sql must add attachments TEXT to habits');
+      const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
+      assert(local.includes("'2.32.193'") && local.includes('ALTER TABLE todos ADD COLUMN attachments TEXT'),
+        'the local migration must add the attachments column to todos');
+      assert(local.includes('ALTER TABLE habits ADD COLUMN attachments TEXT'),
+        'the local migration must add the attachments column to habits');
+      const driveMig = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'drive-migrations.js'), 'utf-8');
+      assert(driveMig.includes("'2.32.193'") && driveMig.includes('store.todos') && driveMig.includes('store.habits'),
+        'the Drive migration must normalize todos and habits attachments');
+    });
+
     test('lists: attachment UI is wired, Drive-gated, and shared items carry the payload', () => {
       const listsSrc = jsFiles['lists.js'];
+      const attSrc = jsFiles['attachments.js'];
       assert(listsSrc.includes('data-action="attach-to-list-item"'), 'items must offer an attach button');
-      assert(listsSrc.includes('data-action="remove-list-item-attachment"'), 'attachment chips must offer removal');
+      assert(listsSrc.includes("'remove-list-item-attachment'"), 'the list item queue must wire the remove action');
+      assert(attSrc.includes('data-action="${actions.remove}"'), 'attachment chips must offer removal');
       assert(listsSrc.includes("typeof state.driveAdapter?.uploadAttachment === 'function'"),
         'the attach button must hide without a Drive adapter');
-      assert(listsSrc.includes('list-item-attachments'), 'attachments must render as chips under the item');
+      assert(listsSrc.includes('attachmentsChipsHtml = attachmentsHtml(item, {'), 'attachments must render as chips under the item');
       assert(listsSrc.includes('item.attachments = normalizeAttachments(sh.payload?.attachments)'),
         'shared items must read attachments from the sharing payload');
-      assert(listsSrc.includes("shareFileWithGroup(item.shared_group_id, record.drive_file_id, 'reader')"),
+      assert(attSrc.includes("shareFileWithGroup(item.shared_group_id, record.drive_file_id, 'reader')"),
         'an attachment on a shared item must be shared with the group before the payload update');
-      assert(listsSrc.includes('window.attachToListItem = attachToListItem'), 'the attach flow must be window-exposed for delegation');
-      assert(listsSrc.includes('window.removeListItemAttachment = removeListItemAttachment'), 'the remove flow must be window-exposed for delegation');
+      assert(listsSrc.includes('window.attachToListItem = (id, el) => listItemAttachments.attach(id, el)'), 'the attach flow must be window-exposed for delegation');
+      assert(listsSrc.includes('window.removeListItemAttachment = (id, fid, el) => listItemAttachments.remove(id, fid, el)'), 'the remove flow must be window-exposed for delegation');
       const delSrc = jsFiles['delegation.js'];
       assert(delSrc.includes("case 'attach-to-list-item':"), 'delegation must route the attach action');
       assert(delSrc.includes("case 'remove-list-item-attachment':"), 'delegation must route the remove action');
@@ -10706,10 +10743,10 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // the uploader's group member id onto every upload; the adapter
       // threads it into the record on both paths. The normalizer drops
       // any record without it.
-      assert(listsSrc.includes('getCurrentMemberId(item.shared_group_id)'), 'the queue must read the uploader’s member id for shared items');
-      assert(listsSrc.includes('getCurrentUserMemberId()'), 'the queue must read the group-independent uploader id for personal items');
-      assert(listsSrc.includes('uploadedBy,'), 'the queue must pass uploadedBy to the adapter');
-      assert(listsSrc.includes("t('lists.attachment_no_uploader')"), 'a missing uploader id must refuse the upload with a toast, not orphan a file');
+      assert(attSrc.includes('getCurrentMemberId(item.shared_group_id)'), 'the queue must read the uploader’s member id for shared items');
+      assert(attSrc.includes('getCurrentUserMemberId()'), 'the queue must read the group-independent uploader id for personal items');
+      assert(attSrc.includes('uploadedBy,'), 'the queue must pass uploadedBy to the adapter');
+      assert(attSrc.includes("t(`${i18nPrefix}.attachment_no_uploader`)"), 'a missing uploader id must refuse the upload with a toast, not orphan a file');
       assert(driveSrc.includes('uploadedBy = null'), 'the adapter must accept uploadedBy in the upload opts');
       assert(driveSrc.includes('const opts = { onProgress, signal, uploadedBy }'), 'the adapter must thread uploadedBy into the upload call');
       assert(driveSrc.includes('attachmentRecordFromUpload(JSON.parse(res.responseText), file, uploadedBy)'), 'the resumable path must stamp uploaded_by on the record');
@@ -10748,8 +10785,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(driveSrc.includes('function claimAttachmentName(fileName, takenNames, claimed)'), 'names must be claimed, not deduped against raw names');
       assert(!driveSrc.includes('inFlightNames'), 'the raw-name in-flight dedupe must be gone from the adapter');
       assert(!listsSrc.includes('inFlightNames'), 'the raw-name in-flight dedupe must be gone from the caller');
-      assert(listsSrc.includes('item.shared_id || item.id'), 'the folder key must be the shared_id for shared items, the local id otherwise');
-      assert(listsSrc.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'), 'deleting an item must trash its attachments folder');
+      assert(attSrc.includes('item.shared_id || item.id'), 'the folder key must be the shared_id for shared items, the local id otherwise');
+      assert(attSrc.includes('trashItemAttachmentsFolder?.(item.shared_id || item.id, referenced)'), 'deleting an item must trash its attachments folder');
       // Progress: the transfer runs over XHR (fetch cannot report upload
       // progress), in 1 MB chunks for the resumable path.
       assert(driveSrc.includes('new XMLHttpRequest()'), 'the upload transport must be XHR for progress events');
@@ -10759,20 +10796,20 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(!driveSrc.includes('attachment_too_large'), 'the adapter must no longer refuse large files');
       assert(!listsSrc.includes('attachment_too_large'), 'the caller must no longer toast a size refusal');
       assert(!listsSrc.includes('_pendingAttachmentUploads'), 'the per-item upload block must be replaced by the pending queue');
-      assert(listsSrc.includes('_pendingAttachments'), 'pending uploads must live in a per-item map');
-      assert(listsSrc.includes('processAttachmentQueue'), 'picked files must drain through a per-item queue');
-      assert(listsSrc.includes('attachmentProgressRing'), 'pending chips must render a progress ring');
-      assert(listsSrc.includes('updateAttachmentProgress'), 'progress must patch the ring in place');
-      assert(listsSrc.includes('data-pending-id'), 'pending chips must be addressable by pending id');
+      assert(attSrc.includes('_pendingAttachments'), 'pending uploads must live in a per-item map');
+      assert(attSrc.includes('async function processQueue(item)'), 'picked files must drain through a per-item queue');
+      assert(attSrc.includes('attachmentProgressRing'), 'pending chips must render a progress ring');
+      assert(attSrc.includes('updateAttachmentProgress'), 'progress must patch the ring in place');
+      assert(attSrc.includes('data-pending-id'), 'pending chips must be addressable by pending id');
       assert(delSrc.includes("case 'cancel-list-item-attachment':"), 'delegation must route the cancel action');
       assert(delSrc.includes("case 'retry-list-item-attachment':"), 'delegation must route the retry action');
-      assert(listsSrc.includes('window.cancelListItemAttachment = cancelListItemAttachment'), 'cancel must be window-exposed for delegation');
-      assert(listsSrc.includes('window.retryListItemAttachment = retryListItemAttachment'), 'retry must be window-exposed for delegation');
-      assert(listsSrc.includes('new AbortController()'), 'each pending upload must own an AbortController');
+      assert(listsSrc.includes('window.cancelListItemAttachment = (id, pid, el) => listItemAttachments.cancel(id, pid, el)'), 'cancel must be window-exposed for delegation');
+      assert(listsSrc.includes('window.retryListItemAttachment = (id, pid, el) => listItemAttachments.retry(id, pid, el)'), 'retry must be window-exposed for delegation');
+      assert(attSrc.includes('new AbortController()'), 'each pending upload must own an AbortController');
       const styleSrc = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf-8');
       assert(styleSrc.includes('.att-progress-ring'), 'the ring must be styled');
-      assert(styleSrc.includes('.list-attachment-chip.pending'), 'pending chips must be styled');
-      assert(styleSrc.includes('.list-attachment-chip.error'), 'failed chips must be styled');
+      assert(styleSrc.includes('.attachment-chip.pending'), 'pending chips must be styled');
+      assert(styleSrc.includes('.attachment-chip.error'), 'failed chips must be styled');
       assert(driveSrc.includes('uploadType=multipart&fields=id,name,size,webViewLink'), 'the upload must request the link back');
       const iface = fs.readFileSync(path.join(JS_DIR, 'sharing-interface.js'), 'utf-8');
       assert(iface.includes('shareFileWithGroup:'), 'the sharing interface must declare shareFileWithGroup');
@@ -10783,10 +10820,73 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       // The keys are picked by variable in places, so the t()-scan test
       // cannot see them all — pin their presence in all three locales directly.
       const i18nSrc = fs.readFileSync(path.join(JS_DIR, 'i18n.js'), 'utf-8');
+      // One definition per locale per namespace (lists, todos, habits):
+      // 3 locales x 3 namespaces = 9.
       for (const key of ['attach_file', 'remove_attachment', 'attach_unavailable', 'attachment_upload_failed', 'attachment_share_failed', 'attachment_added', 'attachment_removed', 'cancel_upload', 'retry_upload', 'attachment_no_uploader', 'share_attachments_failed']) {
         const count = (i18nSrc.match(new RegExp(`${key}:`, 'g')) || []).length;
-        assert(count === 3, `${key} must be defined in all three locales, found ${count}`);
+        assert(count === 9, `${key} must be defined in all three locales for lists, todos and habits, found ${count}`);
       }
+    });
+
+    test('todos: attachment UI is wired, Drive-gated, and shared items carry the payload', () => {
+      const todosSrc = jsFiles['todos.js'];
+      assert(todosSrc.includes('data-action="attach-to-todo"'), 'TODOs must offer an attach button');
+      assert(todosSrc.includes("'remove-todo-attachment'"), 'the TODO queue must wire the remove action');
+      assert(todosSrc.includes("typeof state.driveAdapter?.uploadAttachment === 'function'"),
+        'the attach button must hide without a Drive adapter');
+      assert(todosSrc.includes('attachmentsChipsHtml = attachmentsHtml(td, {'), 'attachments must render as chips under the TODO');
+      assert(todosSrc.includes('todo.attachments = normalizeAttachments(sh.payload?.attachments)'),
+        'shared TODOs must read attachments from the sharing payload');
+      assert(todosSrc.includes('const { error } = await state.sharing.updateItem(todo.shared_group_id, todo.shared_id, { payload: { ...currentPayload, attachments: payload } })'),
+        'shared TODO attachment writes must go through the payload partial update');
+      assert(todosSrc.includes('window.attachToTodo = (id, el) => todoAttachments.attach(id, el)'), 'the attach flow must be window-exposed for delegation');
+      assert(todosSrc.includes('window.removeTodoAttachment = (id, fileId, el) => todoAttachments.remove(id, fileId, el)'), 'the remove flow must be window-exposed for delegation');
+      assert(todosSrc.includes('shareAttachmentsWithGroup(groupId, todoAttachmentsShare)'), 'sharing a TODO must grant its files first');
+      assert(todosSrc.includes('attachments: serializeAttachments(todo.attachments)'), 'unshare and copy-to-personal must carry the records');
+      assert(todosSrc.includes('await trashOwnItemAttachments(todo, allTodos)'), 'deleting a TODO must trash only the deleter’s own files');
+      assert(todosSrc.includes('normalizeAttachments(t.attachments).some(a => (a.name || \'\').toLowerCase().includes(q))'),
+        'TODO search must match attachment names');
+      const delSrc = jsFiles['delegation.js'];
+      assert(delSrc.includes("case 'attach-to-todo':"), 'delegation must route the attach action');
+      assert(delSrc.includes("case 'remove-todo-attachment':"), 'delegation must route the remove action');
+      assert(delSrc.includes("case 'cancel-todo-attachment':"), 'delegation must route the cancel action');
+      assert(delSrc.includes("case 'retry-todo-attachment':"), 'delegation must route the retry action');
+    });
+
+    test('habits: attachment UI is wired, Drive-gated, and shared habits carry attachments top-level', () => {
+      const habitsSrc = jsFiles['habits.js'];
+      assert(habitsSrc.includes('data-action="attach-to-habit"'), 'habits must offer an attach button');
+      assert(habitsSrc.includes("'remove-habit-attachment'"), 'the habit queue must wire the remove action');
+      assert(habitsSrc.includes("typeof state.driveAdapter?.uploadAttachment === 'function'"),
+        'the attach button must hide without a Drive adapter');
+      assert(habitsSrc.includes('attachmentsChipsHtml = attachmentsHtml(habit, {'), 'attachments must render as chips under the habit');
+      assert(habitsSrc.includes('habit.attachments = normalizeAttachments(sh.attachments)'),
+        'shared habits must read attachments top-level, not from a payload');
+      assert(habitsSrc.includes('await state.sharing.updateSharedHabit(habit.shared_group_id, habit.shared_id, { attachments: payload })'),
+        'shared habit attachment writes must publish the array top-level');
+      assert(habitsSrc.includes('window.attachToHabit = (id, el) => habitAttachments.attach(id, el)'), 'the attach flow must be window-exposed for delegation');
+      assert(habitsSrc.includes('window.removeHabitAttachment = (id, fileId, el) => habitAttachments.remove(id, fileId, el)'), 'the remove flow must be window-exposed for delegation');
+      assert(habitsSrc.includes('shareAttachmentsWithGroup(groupId, habitAttachmentsShare)'), 'sharing a habit must grant its files first');
+      assert(habitsSrc.includes('attachments: serializeAttachments(habit.attachments)'), 'unshare and copy-to-personal must carry the records');
+      assert(habitsSrc.includes('await trashOwnItemAttachments(habit, state.allHabits)'), 'deleting a habit must trash only the deleter’s own files');
+      assert(habitsSrc.includes('normalizeAttachments(c.attachments).some(a => (a.name || \'\').toLowerCase().includes(q))'),
+        'habit search must match attachment names');
+      const delSrc = jsFiles['delegation.js'];
+      assert(delSrc.includes("case 'attach-to-habit':"), 'delegation must route the attach action');
+      assert(delSrc.includes("case 'remove-habit-attachment':"), 'delegation must route the remove action');
+      assert(delSrc.includes("case 'cancel-habit-attachment':"), 'delegation must route the cancel action');
+      assert(delSrc.includes("case 'retry-habit-attachment':"), 'delegation must route the retry action');
+    });
+
+    test('welcome: focus rows show read-only attachment chips for TODOs and habits', () => {
+      const welcomeSrc = jsFiles['welcome.js'];
+      assert(welcomeSrc.includes("import { attachmentsHtml } from './attachments.js';"), 'welcome must import the chips renderer');
+      assert(welcomeSrc.includes("attachmentsHtml(td, { removable: false, i18nPrefix: 'todos' })"),
+        'focus TODO rows must show read-only chips');
+      assert(welcomeSrc.includes("attachmentsHtml(habit, { removable: false, i18nPrefix: 'habits' })"),
+        'focus habit rows must show read-only chips');
+      assert(!welcomeSrc.includes("data-action=\"attach-to-todo\""), 'welcome must not offer attaching');
+      assert(!welcomeSrc.includes("data-action=\"attach-to-habit\""), 'welcome must not offer attaching');
     });
 
     test('sharing: the sweep toasts the file owner when it grants a new member', () => {
@@ -10824,8 +10924,13 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         { id: 'c', payload: { text: 'no attachments' } },
         { id: 'd', payload: { attachments: 'not-an-array' } },
         { id: 'e' },
+        // Shared habits carry attachments top-level, not in a payload.
+        { id: 'f', attachments: [
+          { drive_file_id: 'f4', name: 'd.pdf', uploaded_by: 'me' },
+          { drive_file_id: 'f5', name: 'e.pdf', uploaded_by: 'other' },
+        ] },
       ];
-      assert(JSON.stringify(ownAttachmentFileIds(items, 'me').sort()) === JSON.stringify(['f1', 'f3']),
+      assert(JSON.stringify(ownAttachmentFileIds(items, 'me').sort()) === JSON.stringify(['f1', 'f3', 'f4']),
         'the sweep must collect my files only, once each, ignoring other members and malformed payloads');
       assert(ownAttachmentFileIds(items, null).length === 0, 'no member id means no files to sweep');
       assert(ownAttachmentFileIds(null, 'me').length === 0, 'no items means no files to sweep');
@@ -10836,7 +10941,8 @@ test('share popover is viewport-bound with scrollable group and member lists', (
       assert(iface.includes('sweepAttachmentGrants:'), 'the sharing interface must declare sweepAttachmentGrants');
       const driveSrc = jsFiles['sharing-drive.js'];
       assert(driveSrc.includes('async sweepAttachmentGrants(groupId)'), 'the Drive adapter must implement sweepAttachmentGrants');
-      assert(driveSrc.includes("ownAttachmentFileIds(e.typeData['lists'] || [], myId)"), 'the sweep must scan my list-item payloads');
+      assert(driveSrc.includes("for (const type of ['lists', 'todos', 'habits'])"), 'the sweep must scan lists, todos and habits');
+      assert(driveSrc.includes('ownAttachmentFileIds(e.typeData[type] || [], myId)'), 'the sweep must scan each type for my files');
       assert(driveSrc.includes("this.shareFileWithGroup(groupId, fileId, 'reader')"), 'the sweep must grant each file reader');
       // Load-time trigger: post-load repairs in loadAll.
       const loadStart = driveSrc.indexOf('async loadAll()');

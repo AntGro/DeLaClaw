@@ -1381,6 +1381,127 @@ test('Chunk scores: migration 2.32.149 adds recent_scores on both backends', asy
     'drive migration must leave rows without scores untouched');
 });
 
+// ===================================================================
+// 22g. Chunk-progress delta repair (v2.32.200): never wipe reviewed
+// chunks on a bare count mismatch (Intégrale, 2026-11-28)
+// ===================================================================
+function loadChunkRepairHelpers() {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('// ── Pure chunk-score helpers ──');
+  const end = fc.indexOf('// ── End pure chunk-progress repair helpers ──');
+  assert(start !== -1 && end > start, 'could not find the pure chunk-progress repair helpers block in flashcards.js');
+  return new Function(`${fc.slice(start, end)}; return { chunkHasReviewState, planChunkProgressRepair };`)();
+}
+function integralRows() {
+  // Intégrale miniature: 37 rows, review state on chunks 17-20 only.
+  return Array.from({ length: 37 }, (_, i) => ({
+    id: 'r' + i, chunk_index: i,
+    ...(i >= 17 && i <= 20
+      ? { last_review: '2026-11-27T10:00:00Z', next_review: '2026-12-01T10:00:00Z', stability: 5, difficulty: 5, review_count: 2, recent_scores: '[0.8,1]' }
+      : {}),
+  }));
+}
+
+test('Chunk repair: chunkHasReviewState counts FSRS state and score history, not reset defaults', () => {
+  const { chunkHasReviewState } = loadChunkRepairHelpers();
+  assert(!chunkHasReviewState({}), 'a blank row carries no state');
+  assert(!chunkHasReviewState(null), 'a missing row carries no state');
+  assert(!chunkHasReviewState({ stability: 0, difficulty: 5, review_count: 0, last_review: null, next_review: null, recent_scores: null }),
+    'a chunk-edit reset row (stability 0, difficulty 5) carries no state');
+  assert(chunkHasReviewState({ last_review: '2026-11-27T10:00:00Z', stability: 5, review_count: 2 }),
+    'a reviewed row carries state');
+  assert(chunkHasReviewState({ recent_scores: '[0.8]' }),
+    'a score history alone carries state — free practice writes scores without FSRS');
+  assert(chunkHasReviewState({ stability: 0.007, review_count: 1 }),
+    'a lapsed row (tiny stability) still carries state');
+});
+
+test('Chunk repair: no mismatch is a no-op', () => {
+  const { planChunkProgressRepair } = loadChunkRepairHelpers();
+  const plan = planChunkProgressRepair(integralRows(), 37);
+  assert(plan.kept.length === 37, 'all rows kept');
+  assert(plan.insertIndexes.length === 0 && plan.deleteRowIds.length === 0 && plan.preservedRows.length === 0,
+    'nothing to insert, delete or preserve');
+});
+
+test('Chunk repair: a missing index is inserted, reviewed rows are untouched', () => {
+  const { planChunkProgressRepair } = loadChunkRepairHelpers();
+  const rows = integralRows().filter(r => r.chunk_index !== 5);
+  const plan = planChunkProgressRepair(rows, 37);
+  assert(JSON.stringify(plan.insertIndexes) === JSON.stringify([5]), 'only the missing index is inserted');
+  assert(plan.deleteRowIds.length === 0 && plan.preservedRows.length === 0, 'nothing deleted or preserved');
+  assert(plan.kept.length === 36 && plan.kept.some(r => r.chunk_index === 17 && r.last_review),
+    'reviewed rows stay kept');
+});
+
+test('Chunk repair: a surplus blank row is removed, a surplus reviewed row is preserved, never deleted', () => {
+  const { planChunkProgressRepair } = loadChunkRepairHelpers();
+  // Chunking shrinks 37 -> 18: blank surplus rows may go, the reviewed
+  // chunks 18-20 must survive the mismatch.
+  const plan = planChunkProgressRepair(integralRows(), 18);
+  assert(plan.kept.length === 18, 'only in-range rows kept');
+  assert(plan.insertIndexes.length === 0, 'no inserts when shrinking');
+  assert(JSON.stringify(plan.preservedRows.map(r => r.chunk_index)) === JSON.stringify([18, 19, 20]),
+    'surplus reviewed rows are preserved');
+  assert(!plan.deleteRowIds.some(id => ['r18', 'r19', 'r20'].includes(id)),
+    'no reviewed row is ever in the delete list');
+  assert(plan.deleteRowIds.length === 16, 'only the blank surplus rows are deleted');
+  // A single surplus blank row past the end is removed on its own.
+  const blank = planChunkProgressRepair([...integralRows(), { id: 'extra', chunk_index: 37 }], 37);
+  assert(JSON.stringify(blank.deleteRowIds) === JSON.stringify(['extra']), 'surplus blank row deleted');
+  assert(blank.preservedRows.length === 0, 'nothing to preserve');
+});
+
+test('Chunk repair: count matches but indexes are misaligned', () => {
+  const { planChunkProgressRepair } = loadChunkRepairHelpers();
+  const rows = [{ id: 'a', chunk_index: 0 }, { id: 'b', chunk_index: 1 }, { id: 'c', chunk_index: 3 }];
+  const plan = planChunkProgressRepair(rows, 3);
+  assert(JSON.stringify(plan.insertIndexes) === JSON.stringify([2]), 'the missing index is inserted despite matching counts');
+  assert(JSON.stringify(plan.deleteRowIds) === JSON.stringify(['c']), 'the out-of-range blank row is deleted');
+  assert(plan.kept.length === 2, 'in-range rows kept');
+});
+
+test('Chunk repair: a duplicate index keeps the reviewed copy', () => {
+  const { planChunkProgressRepair } = loadChunkRepairHelpers();
+  const blankFirst = planChunkProgressRepair([
+    { id: 'a', chunk_index: 0 },
+    { id: 'b', chunk_index: 0, last_review: '2026-11-27T00:00:00Z', stability: 3, review_count: 1 },
+  ], 1);
+  assert(JSON.stringify(blankFirst.kept.map(r => r.id)) === JSON.stringify(['b']), 'the reviewed duplicate is kept');
+  assert(JSON.stringify(blankFirst.deleteRowIds) === JSON.stringify(['a']), 'the blank duplicate is deleted');
+  const reviewedFirst = planChunkProgressRepair([
+    { id: 'b', chunk_index: 0, last_review: '2026-11-27T00:00:00Z', stability: 3, review_count: 1 },
+    { id: 'a', chunk_index: 0 },
+  ], 1);
+  assert(JSON.stringify(reviewedFirst.kept.map(r => r.id)) === JSON.stringify(['b']), 'the reviewed copy stays kept');
+  assert(JSON.stringify(reviewedFirst.deleteRowIds) === JSON.stringify(['a']), 'the blank duplicate is deleted');
+});
+
+test('Chunk repair: refreshFlashcards repairs by delta and never deletes by text_id', () => {
+  const fc = jsFiles['flashcards.js'];
+  const start = fc.indexOf('async function refreshFlashcards()');
+  const end = fc.indexOf('// ── Deck Nav Buttons ──', start);
+  assert(start !== -1 && end > start, 'could not find refreshFlashcards in flashcards.js');
+  const body = fc.slice(start, end);
+  assert(body.includes('planChunkProgressRepair(existing, chunkCount)'),
+    'refreshFlashcards must plan the repair from the existing rows and the chunk count');
+  assert(!body.includes(".delete().eq('text_id'"),
+    'the repair must never delete a whole text\'s progress rows at once');
+  assert(body.includes(".delete().eq('id', rowId)"),
+    'surplus rows are deleted one by one, by row id');
+  assert(body.includes('preservedRows.length'),
+    'state-carrying surplus rows must be preserved and warned about, not wiped');
+  assert(body.includes('insertIndexes.map(idx => ({ text_id: tx.id, chunk_index: idx }))'),
+    'blanks are inserted only for the missing indexes');
+  // The deliberate invalidation path is untouched: whole-text edits
+  // still drop progress via persistTextEdit in scene-parse.js.
+  assert(fc.includes('persistTextEdit(state.db, id, tx, updates,'),
+    'saveEditText must still persist via persistTextEdit');
+  const sp = fs.readFileSync(path.join(__dirname, '..', 'js', 'scene-parse.js'), 'utf-8');
+  assert(sp.includes("delete().eq('text_id', id)"),
+    'persistTextEdit must keep its deliberate whole-text progress deletion');
+});
+
 test('Projects removal: migration 2.32.190 moves projects/tasks/prompts into Lists on both backends', async () => {
   const local = fs.readFileSync(path.join(__dirname, '..', 'migrations', 'local-migrations.js'), 'utf-8');
   assert(local.includes("'2.32.190':"),
@@ -5479,12 +5600,16 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'didascalies text must be left-aligned inside the bubble');
     });
 
-    test('auto-repair heals count-mismatched chunk progress', () => {
+    test('auto-repair heals count-mismatched chunk progress by delta, never by delete-all', () => {
       const flashJs = jsFiles['flashcards.js'];
-      assert(flashJs.includes('existing.length !== chunkCount'),
+      const start = flashJs.indexOf('async function refreshFlashcards()');
+      const end = flashJs.indexOf('// ── Deck Nav Buttons ──', start);
+      assert(start !== -1 && end > start, 'could not find refreshFlashcards in flashcards.js');
+      const body = flashJs.slice(start, end);
+      assert(body.includes('planChunkProgressRepair(existing, chunkCount)'),
         'auto-repair must detect count-mismatched progress, not just missing progress');
-      assert(flashJs.includes("await state.db.from('text_line_progress').delete().eq('text_id', tx.id);"),
-        'auto-repair must drop stale rows before regenerating');
+      assert(!body.includes(".delete().eq('text_id'"),
+        'auto-repair must never drop a whole text\'s progress rows at once (Intégrale, 2026-11-28)');
     });
 
     test('scene parser: one block is one unit, inner newlines preserved', async () => {

@@ -523,6 +523,18 @@ test('style.css pins .welcome-container to full width (no flex shrink-wrap)', ()
   assert(rule[1].includes('width:100%'), '.welcome-container must keep width:100%');
 });
 
+// The confirm modal's message is plain text (textContent), so the
+// overflow-wrap:anywhere on links inside it never applies to a long
+// unbroken filename — Remove "att.d_…"? ran past the modal edge
+// (v2.32.203). The message itself must wrap anywhere, like the
+// detail box's word-break already does.
+test('style.css wraps long unbroken names in the confirm modal message', () => {
+  const rule = styleCss.match(/\.confirm-action-msg\{([^}]*)\}/);
+  assert(rule, 'Missing .confirm-action-msg rule');
+  assert(rule[1].includes('overflow-wrap:anywhere'),
+    'the confirm message must break long unbroken tokens instead of overflowing the modal');
+});
+
 // Phone Welcome rows are full-width, so they show titles, not the
 // dots-only month-grid rule (which would render every busy day alike).
 test('style.css shows Welcome strip titles on phones (not dots-only)', () => {

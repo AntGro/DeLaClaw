@@ -792,7 +792,7 @@ button.saving::after{content:'';position:absolute;inset:0;background:linear-grad
 .confirm-action-icon-wrap{width:56px;height:56px;border-radius:50%;background:rgba(239,68,68,0.12);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;animation:iconBounceIn 0.4s 0.1s cubic-bezier(0.34,1.56,0.64,1) both;}
 .confirm-action-icon-svg{color:var(--red);flex-shrink:0;}
 .confirm-action-modal h2{color:var(--red);font-size:1.05rem;margin-bottom:6px;font-weight:700;}
-.confirm-action-msg{font-size:0.88rem;color:var(--muted);margin:8px 0 4px;line-height:1.5;}
+.confirm-action-msg{font-size:0.88rem;color:var(--muted);margin:8px 0 4px;line-height:1.5;overflow-wrap:anywhere;}
 .confirm-action-msg a{color:var(--accent);text-decoration:underline;overflow-wrap:anywhere;}
 .confirm-action-detail{font-size:0.8rem;color:var(--text);background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);border-radius:8px;padding:10px 14px;margin:12px 0 4px;line-height:1.4;word-break:break-word;}
 .confirm-action-modal .modal-actions{justify-content:center;gap:12px;margin-top:20px;}

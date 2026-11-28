@@ -23,6 +23,7 @@ import { esc, escQ, showToast, showConfirmAction, isDesktopLike, setConfirmActio
 import { lucideIcon } from './icons.js';
 import { LOGOS } from './backend-logos.js';
 import { decodeInviteEnvelope } from './sharing-envelope.js';
+import { serializeAttachments } from './attachments.js';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -517,6 +518,12 @@ async function _convertGroupItemsToPersonal(groupId) {
         enriched.text = sh.payload?.text || sh.payload?.title || row.text || '';
         if (sh.payload?.priority) enriched.priority = sh.payload.priority;
         if (sh.payload?.due_date) enriched.due_date = sh.payload.due_date;
+        // Keep the original attachments, still pointing at the shared files
+        // (v2.32.195) — the grants survive leaving, so the links keep
+        // opening. The records keep their original uploaded_by, so a later
+        // delete of the kept copy never trashes another member's file.
+        const atts = serializeAttachments(sh.payload?.attachments);
+        if (atts) enriched.attachments = atts;
       }
       // Move __shared__ category items to General
       if (sharedCat && defaultCat && row.category_id === sharedCat.id) {
@@ -546,6 +553,10 @@ async function _convertGroupItemsToPersonal(groupId) {
       if (sh) {
         enriched.name = sh.name || sh.payload?.name || row.name || '';
         enriched.frequency_rule = sh.frequency_rule || sh.payload?.frequency_rule || row.frequency_rule || '';
+        // Keep the original attachments — top-level on the shared habit
+        // (v2.32.195), same keep-the-records rule as list items and TODOs.
+        const atts = serializeAttachments(sh.attachments);
+        if (atts) enriched.attachments = atts;
       }
       if (sharedCat && defaultCat && row.category_id === sharedCat.id) {
         enriched.category = '';

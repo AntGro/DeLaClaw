@@ -1,6 +1,6 @@
 # DeLaClaw CODEMAP — T2 enriched
 
-> Generated 2026-11-28T01:48:18.840Z from 50 modules (v2.32.194). Total LOC 40795. Do not hand-edit.
+> Generated 2026-11-28T01:55:00.622Z from 50 modules (v2.32.195). Total LOC 40806. Do not hand-edit.
 > Source: `scripts/generate-codemap.js`
 
 ## How to use (AI agents)
@@ -30,15 +30,15 @@
 | i18n | 2576 | - |  | agents-ui.js,attachments.js,birthdays.js,calendar-sync.js | pendingSet |
 | drive | 2042 | - | ../migrations/drive-migrations.js,../migrations/version-compare.js,./../migrations/drive-migrations,./../migrations/version-compare | - | pendingSet |
 | item-utils | 1691 | - | db,i18n,icons,state | agents-ui.js,attachments.js,batch-import.js,birthdays.js | - |
+| sharing-ui | 1280 | events,habit_categories,habit_completions,habits,list_items,todo_categories,todos | attachments,backend-logos,i18n,icons | calendar.js,events.js,groups.js,habits.js | esc:38,guard+pendingSet,window:8 |
 | calendar-sync | 1269 | birthdays,events,gcal_sync,habits,settings,todos | calendar-pure,drive-folders,habits,i18n | main.js | - |
-| sharing-ui | 1269 | events,habit_categories,habit_completions,habits,list_items,todo_categories,todos | backend-logos,i18n,icons,sharing-envelope | calendar.js,events.js,groups.js,habits.js | esc:38,guard+pendingSet,window:8 |
 | utils | 1064 | flashcards,x | calendar-pure,i18n,icons,sections-pure | - | esc:8,window:6 |
 | calendar | 1049 | - | calendar-pure,habits,i18n,icons | main.js,welcome.js | esc:26,window:8 |
 | events | 744 | events | calendar-pure,i18n,icons,sharing-ui | main.js | esc:19,pendingSet,window:8 |
 | sections-pure | 570 | flashcard_decks,flashcards,texts |  | calendar.js,flashcards.js,habits.js,lists.js | - |
 | batch-import | 564 | - | calendar-pure,icons,import-pure,state | - | esc:14 |
 | delegation | 542 | - |  | - | window:1 |
-| attachments | 505 | - | i18n,icons,state,utils | habits.js,lists.js,todos.js,welcome.js | esc:15,pendingSet |
+| attachments | 505 | - | i18n,icons,state,utils | habits.js,lists.js,sharing-ui.js,todos.js | esc:15,pendingSet |
 | calendar-pure | 500 | - |  | batch-import.js,birthdays.js,calendar-sync.js,calendar.js | - |
 | demo-chooser | 488 | - | calendar-pure,habits,i18n,icons | - | - |
 | hero | 448 | - | logo | main.js | - |

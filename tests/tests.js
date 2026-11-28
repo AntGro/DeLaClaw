@@ -10586,6 +10586,105 @@ test('share popover is viewport-bound with scrollable group and member lists', (
         'the unshare personal copy must carry the original attachment records');
     });
 
+    test('sharing: keep-copies carries TODO and habit attachments', () => {
+      const uiSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+      const fnStart = uiSrc.indexOf('async function _convertGroupItemsToPersonal');
+      const todoStart = uiSrc.indexOf('// ── Todos ──', fnStart);
+      const habitStart = uiSrc.indexOf('// ── Habits ──', todoStart);
+      const listStart = uiSrc.indexOf('// ── List items ──', habitStart);
+      const todoSec = uiSrc.slice(todoStart, habitStart);
+      const habitSec = uiSrc.slice(habitStart, listStart);
+      assert(todoSec.includes('serializeAttachments(sh.payload?.attachments)'),
+        'keep-copies must carry a TODO’s attachment records from the payload');
+      assert(habitSec.includes('serializeAttachments(sh.attachments)'),
+        'keep-copies must carry a habit’s attachment records from the shared habit object');
+    });
+
+    test('sharing: keep-copies conversion carries TODO and habit attachments into the personal rows', async () => {
+      const uiSrc = fs.readFileSync(path.join(JS_DIR, 'sharing-ui.js'), 'utf-8');
+      const start = uiSrc.indexOf('async function _convertGroupItemsToPersonal');
+      assert(start >= 0, '_convertGroupItemsToPersonal must be defined in sharing-ui.js');
+      const end = uiSrc.indexOf('\n}\n', start) + 3;
+      const todoAtts = [{ drive_file_id: 'f-todo', name: 'list.pdf', size: 100, url: 'https://drive.google.com/file/d/f-todo/view', uploaded_by: 'member-aaa' }];
+      const habitAtts = [{ drive_file_id: 'f-habit', name: 'plan.pdf', size: 200, url: 'https://drive.google.com/file/d/f-habit/view', uploaded_by: 'member-bbb' }];
+      const listAtts = [{ drive_file_id: 'f-list', name: 'notes.pdf', size: 300, url: 'https://drive.google.com/file/d/f-list/view', uploaded_by: 'member-ccc' }];
+      const rows = {
+        todo_categories: [
+          { id: 'tc-shared', name: '__shared__', is_protected: 1 },
+          { id: 'tc-gen', name: 'General', is_protected: 1 },
+        ],
+        habit_categories: [
+          { id: 'hc-shared', name: '__shared__', is_protected: 1 },
+          { id: 'hc-gen', name: 'General', is_protected: 1 },
+        ],
+        todos: [
+          { id: 't1', text: '', shared_id: 'sh-t1', shared_group_id: 'g1', category_id: 'tc-shared' },
+          { id: 't2', text: 'plain', shared_id: 'sh-t2', shared_group_id: 'g1', category_id: 'tc-gen' },
+        ],
+        habits: [
+          { id: 'h1', name: '', shared_id: 'sh-h1', shared_group_id: 'g1', category_id: 'hc-shared', frequency_rule: '' },
+        ],
+        list_items: [
+          { id: 'l1', text: '', note: '', shared_id: 'sh-l1', shared_group_id: 'g1' },
+        ],
+        events: [],
+      };
+      const sharedTodos = [
+        { id: 'sh-t1', group_id: 'g1', payload: { text: 'Buy milk', priority: 'high', due_date: '2026-12-01', attachments: todoAtts } },
+        { id: 'sh-t2', group_id: 'g1', payload: { text: 'plain', priority: 'normal' } },
+      ];
+      const sharedHabits = [
+        { id: 'sh-h1', group_id: 'g1', item_type: 'habit', name: 'Run', frequency_rule: 'weekly', attachments: habitAtts, completions: [] },
+      ];
+      const sharedListItems = [
+        { id: 'sh-l1', group_id: 'g1', payload: { text: 'Item', attachments: listAtts } },
+      ];
+      const updates = [];
+      const db = {
+        from: (table) => ({
+          select: () => {
+            const p = Promise.resolve({ data: rows[table] || [], error: null });
+            p.eq = (k, v) => Promise.resolve({ data: (rows[table] || []).filter(r => r[k] === v), error: null });
+            return p;
+          },
+          update: (patch) => ({
+            eq: (k, v) => { updates.push({ table, id: v, patch }); return Promise.resolve({ data: null, error: null }); },
+          }),
+          insert: (row) => Promise.resolve({ data: null, error: null }),
+        }),
+      };
+      const fakeState = {
+        sharing: {
+          getAllSharedItems: () => [...sharedTodos, ...sharedListItems],
+          getAllSharedHabits: () => sharedHabits,
+        },
+        db,
+      };
+      // The conversion reads serializeAttachments as a module import — pull the
+      // real pure helpers out of attachments.js so the test exercises the
+      // actual validation, not a stub.
+      const attSrc = fs.readFileSync(path.join(JS_DIR, 'attachments.js'), 'utf-8');
+      const normStart = attSrc.indexOf('function normalizeAttachments(value) {');
+      const normEnd = attSrc.indexOf('\n}\n', normStart) + 3;
+      const serStart = attSrc.indexOf('function serializeAttachments(list) {');
+      const serEnd = attSrc.indexOf('\n}\n', serStart) + 3;
+      const serializeAttachments = new Function(`${attSrc.slice(normStart, normEnd)}; ${attSrc.slice(serStart, serEnd)}; return serializeAttachments;`)();
+      const convert = new Function('state', 'serializeAttachments', `${uiSrc.slice(start, end)}; return _convertGroupItemsToPersonal;`)(fakeState, serializeAttachments);
+      await convert('g1');
+      const todoPatch = updates.find(u => u.table === 'todos' && u.id === 't1')?.patch;
+      assert(todoPatch && todoPatch.shared_id === null && todoPatch.shared_group_id === null, 'the kept TODO must be unlinked from the group');
+      assert(todoPatch && todoPatch.text === 'Buy milk' && todoPatch.priority === 'high' && todoPatch.due_date === '2026-12-01', 'the kept TODO must keep its shared text, priority and due date');
+      assert(todoPatch && todoPatch.attachments === JSON.stringify(todoAtts), 'the kept TODO must carry the original attachment records');
+      assert(todoPatch && todoPatch.category_id === 'tc-gen', 'a __shared__ TODO must move to General');
+      const plainPatch = updates.find(u => u.table === 'todos' && u.id === 't2')?.patch;
+      assert(plainPatch && !('attachments' in plainPatch), 'a TODO without attachments must not gain an attachments field');
+      const habitPatch = updates.find(u => u.table === 'habits' && u.id === 'h1')?.patch;
+      assert(habitPatch && habitPatch.name === 'Run' && habitPatch.frequency_rule === 'weekly', 'the kept habit must keep its shared name and frequency');
+      assert(habitPatch && habitPatch.attachments === JSON.stringify(habitAtts), 'the kept habit must carry the original attachment records');
+      const listPatch = updates.find(u => u.table === 'list_items' && u.id === 'l1')?.patch;
+      assert(listPatch && listPatch.attachments === JSON.stringify(listAtts), 'the kept list item must still carry the original attachment records');
+    });
+
     test('lists: sharedListItemPayload carries attachments only when the item has any', () => {
       const { sharedListItemPayload } = loadListItemHelpers();
       const item = { text: 'Train ticket', note: 'refundable', attachments: [
